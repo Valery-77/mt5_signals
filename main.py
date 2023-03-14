@@ -1,85 +1,41 @@
 import asyncio
 import aiohttp
-from datetime import datetime, timedelta
-from terminal import init_mt
+from terminal import *
 
-SERVER_DELTA_TIME = timedelta(hours=4)
-start_date = datetime.now().replace(microsecond=0)
 trading_event = asyncio.Event()  # init async event
 lieder_positions = []  # default var
 signals_settings = {}  # default var
+lieder_setup = {
+    'terminal_path': r'C:\Program Files\MetaTrader 5\terminal64.exe',
+    'login': 66587203,
+    'password': '3hksvtko',
+    'server': 'MetaQuotes-Demo'
+}
 
 sleep_update = 3  # пауза для обновления лидера
 
 host = 'http://127.0.0.1:8000/api/'
 
-# def set_dummy_data():
-#     global start_date
-#     investment_size = 1000
-#     source['lieder'] = {
-#         'terminal_path': r'C:\Program Files\MetaTrader 5\terminal64.exe',
-#         'login': 66587203,
-#         'password': '3hksvtko',
-#         'server': 'MetaQuotes-Demo'
-#     }
-#     source['investors'] = [
-#         {
-#             'terminal_path': r'C:\Program Files\MetaTrader 5_2\terminal64.exe',
-#             'login': 65766034,
-#             'password': 'h0nmgczo',
-#             'server': 'MetaQuotes-Demo',
-#             'investment_size': investment_size,
-#             'dcs_access': True,
-#
-#             'deal_in_plus': 0.1,
-#             'deal_in_minus': -0.1,
-#             'waiting_time': 1,
-#             'ask_an_investor': 'Все',
-#             'price_refund': 'Да',
-#             # -----------------------------------------
-#             'multiplier': 'Баланс',
-#             'multiplier_value': 100.0,
-#             'changing_multiplier': 'Да',
-#             # -----------------------------------------
-#             'stop_loss': 'Процент',
-#             'stop_value': 20.0,
-#             'open_trades': 'Закрыть',
-#             # -----------------------------------------
-#             'shutdown_initiator': 'Инвестор',
-#             'disconnect': 'Нет',
-#             'open_trades_disconnect': 'Закрыть',
-#             'notification': 'Нет',
-#             'blacklist': 'Нет',
-#             'accompany_transactions': 'Нет',
-#             # -----------------------------------------=
-#             'no_exchange_connection': 'Нет',
-#             'api_key_expired': 'Нет',
-#             # -----------------------------------------
-#             'closed_deals_myself': 'Переоткрывать',
-#             'reconnected': 'Переоткрывать',
-#             # -----------------------------------------
-#             'recovery_model': 'Не корректировать',
-#             'buy_hold_model': 'Не корректировать',
-#             # -----------------------------------------
-#             'not_enough_margin': 'Минимальный объем',
-#             'accounts_in_diff_curr': 'Доллары',
-#             # -----------------------------------------
-#             'synchronize_deals': 'Нет',
-#             'deals_not_opened': 'Нет',
-#             'closed_deal_investor': 'Нет',
-#             # -----------------------------------------
-#         }
-#     ]
-#     source['investors'].append(source['investors'][0].copy())
-#     source['investors'][1]['terminal_path'] = r'C:\Program Files\MetaTrader 5_3\terminal64.exe'
-#     source['investors'][1]['login'] = 5009600048
-#     source['investors'][1]['password'] = 'sbbsapv5'
-#     source['settings'] = {
-#         "relevance": True,
-#         "update_at": str(start_date),
-#         "create_at": str(start_date)
-#         # "access": response['access'],
-#     }
+
+def create_signal_json(lieder_position, status):
+    return {'ticket': lieder_position.ticket,
+            'deal_type': lieder_position.type,
+            'current_price': lieder_position.price_current,
+            'signal_symbol': lieder_position.symbol,
+            'open_price': lieder_position.price_open,
+            'goal': lieder_position.tp,
+            'stop_value': lieder_position.sl,
+            'profitability': lieder_position.profit,
+            'status': status, }
+    # 'type_ticket': '???',
+    # 'pattern': 'Из стратегии',
+    # 'signal_class': 'Из стратегии',
+    # 'leverage': -1,
+    # 'goal_value': -1,
+    # 'stop': -1,
+    # 'close_date': -1,
+    # 'fin_res': -1,
+    # 'draw_down': -1}
 
 
 async def get_settings(sleep=sleep_update):
@@ -94,23 +50,52 @@ async def get_settings(sleep=sleep_update):
             print(e)
             response = {}
         signals_settings = response
-        print(signals_settings)
+        # print(signals_settings)
+        if len(response) > 0:
+            investor_data = {'login': response[0]['investor_login_1'],
+                             'password': response[0]['investor_password_1'],
+                             'server': response[0]['investor_server_1'],
+                             'investment': response[0]['investment_1'],
+                             'multiplier': response[0]['multiplier'],
+                             'state': response[0]['state'],
+                             'target_value': response[0]['target_value'],
+                             'stop_value': response[0]['stop_value'],
+                             'opening_deal': response[0]['opening_deal'],
+                             'closing_deal': response[0]['closing_deal'],
+                             'target_and_stop': response[0]['target_and_stop'],
+                             'profitability': response[0]['profitability'],
+                             'risk': response[0]['risk'],
+                             'profit': response[0]['profit']}
+            source['investors'].append(investor_data)
+            investor_data_second = investor_data.copy()
+            investor_data_second['login'] = response[0]['investor_login_2']
+            investor_data_second['password'] = response[0]['investor_password_2']
+            investor_data_second['server'] = response[0]['investor_server_2']
+            investor_data_second['investment'] = response[0]['investment_2']
+            source['investors'].append(investor_data_second)
         await asyncio.sleep(sleep)
 
 
 async def update_lieder_info(sleep=sleep_update):
     global lieder_positions
     while True:
-        # if len(source) > 0:
-        #     init_res = init_mt(init_data=source['lieder'])
-        #     if not init_res:
-        #         await asyncio.sleep(sleep)
-        #         continue
-        #     lieder_positions = Mt.positions_get()
-        #     print(
-        #         f'\nLIEDER {source["lieder"]["login"]} [{source["lieder"]["currency"]}] - {len(lieder_positions)} positions :',
-        #         datetime.utcnow().replace(microsecond=0))
-        #     trading_event.set()
+        lid_positions = get_lieder_positions(lieder_data=lieder_setup)
+        lieder_positions = lid_positions
+        if lid_positions:
+            for position in lid_positions:
+                url = host + 'create_signal'
+                data_json = create_signal_json(position, True)
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url=url, data=data_json) as resp_post:
+                        response = await resp_post.json()
+                        if resp_post.status == 400:
+                            url = host + f'update_signal/{data_json["ticket"]}'
+                            data = {'current_price': data_json['current_price'],
+                                    'profitability': data_json['profitability']}
+                            async with session.patch(url=url, data=data) as resp_patch:
+                                response = await resp_patch.json()
+                        # print(response)
+            trading_event.set()
         await asyncio.sleep(sleep)
 
 
@@ -157,7 +142,7 @@ async def execute_investor(investor):
 
     # закрытие позиций от лидера
     if True:
-        close_positions_by_lieder(investor)
+        close_positions_by_lieder(investor, lieder_positions)
 
     # Mt.shutdown()
 
@@ -174,11 +159,8 @@ async def task_manager():
 
 
 if __name__ == '__main__':
-    # set_dummy_data()
     event_loop = asyncio.new_event_loop()
-    # event_loop.create_task(update_setup())  # для теста без сервера закомментировать
     event_loop.create_task(get_settings())
-
-    # event_loop.create_task(update_lieder_info())
+    event_loop.create_task(update_lieder_info())
     # event_loop.create_task(task_manager())
     event_loop.run_forever()

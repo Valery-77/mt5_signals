@@ -102,9 +102,8 @@ MAGIC = 9876543210  # идентификатор эксперта
 DEVIATION = 20  # допустимое отклонение цены в пунктах при совершении сделки
 
 source = {
-    # 'lieder': {},
     # 'investors': [{}, {}],
-    # 'settings': {}
+    'investors': [],
 }
 
 
@@ -194,6 +193,12 @@ def get_pos_pips_sl(position, price=None):
     if position.sl > 0:
         result = round(fabs(price - position.sl) / Mt.symbol_info(position.symbol).point)
     return result
+
+
+def get_lieder_positions(lieder_data):
+    if init_mt(lieder_data):
+        return Mt.positions_get()
+    return None
 
 
 def get_investor_positions(only_own=True):
