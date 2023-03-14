@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from math import fabs
 import MetaTrader5 as Mt
 import requests
-from django.core.serializers.json import DjangoJSONEncoder
 
 send_retcodes = {
     -200: ('CUSTOM_RETCODE_WRONG_SYMBOL', 'Нет такого торгового символа'),
