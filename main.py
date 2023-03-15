@@ -38,6 +38,14 @@ def create_signal_json(lieder_position, status):
     # 'draw_down': -1}
 
 
+def is_signal_actual(signal_item, deviation_actual):
+    price = signal_item['open_price']
+    prc = price / 100
+    top = price + deviation_actual * prc
+    bottom = price - deviation_actual * prc
+    return bottom < price < top
+
+
 async def get_settings(sleep=sleep_update):
     global signals_settings
     url = host + 'signals_settings'
@@ -87,14 +95,15 @@ async def update_lieder_info(sleep=sleep_update):
                 data_json = create_signal_json(position, True)
                 async with aiohttp.ClientSession() as session:
                     async with session.post(url=url, data=data_json) as resp_post:
-                        response = await resp_post.json()
+                        await resp_post.json()
                         if resp_post.status == 400:
                             url = host + f'update_signal/{data_json["ticket"]}'
                             data = {'current_price': data_json['current_price'],
                                     'profitability': data_json['profitability']}
                             async with session.patch(url=url, data=data) as resp_patch:
-                                response = await resp_patch.json()
-                        # print(response)
+                                await resp_patch.json()
+                        # if resp_post.status == 200 or resp_patch.status == 200:
+                        #     lid_positions.remove(position)
             trading_event.set()
         await asyncio.sleep(sleep)
 
