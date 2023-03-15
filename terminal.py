@@ -95,16 +95,12 @@ reasons_code = {
     '07': 'Закрыто по условию стоп-лосс',
     '08': 'Объем изменен',
     '09': 'Лимиты изменены',
+    '10': 'Ручное закрытие через инвест платформу',
 }
 
 TIMEOUT_INIT = 60_000  # время ожидания при инициализации терминала (рекомендуемое 60_000 millisecond)
 MAGIC = 9876543210  # идентификатор эксперта
 DEVIATION = 20  # допустимое отклонение цены в пунктах при совершении сделки
-
-source = {
-    # 'investors': [{}, {}],
-    'investors': [],
-}
 
 
 class DealComment:
@@ -170,9 +166,11 @@ class DealComment:
 
 def init_mt(init_data):
     """Инициализация терминала"""
-    res = Mt.initialize(login=init_data['login'], server=init_data['server'], password=init_data['password'],
-                        path=init_data['terminal_path'], timeout=TIMEOUT_INIT, port=8223)
-    return res
+    result = Mt.initialize(login=init_data['login'], server=init_data['server'], password=init_data['password'],
+                           path=init_data['terminal_path'], timeout=TIMEOUT_INIT)
+    if not result:
+        print(f'\t !!! {init_data["login"]} - Ошибка инициализации - {init_data["terminal_path"]}')
+    return result
 
 
 def get_pos_pips_tp(position, price=None):
@@ -195,42 +193,40 @@ def get_pos_pips_sl(position, price=None):
     return result
 
 
-def get_lieder_positions(lieder_data):
-    if init_mt(lieder_data):
+def get_lieder_positions(lieder_init_data):
+    if init_mt(lieder_init_data):
         return Mt.positions_get()
     return None
 
 
 def get_investor_positions(only_own=True):
-    """Количество открытых позиций"""
     result = []
-    if len(source) > 0:
-        positions = Mt.positions_get()
-        if not positions:
-            positions = []
-        if only_own and len(positions) > 0:
-            for _ in positions:
-                if positions[positions.index(_)].magic == MAGIC and DealComment.is_valid_string(_.comment):
-                    result.append(_)
-        else:
-            result = positions
+    positions = Mt.positions_get()
+    if not positions:
+        return []
+    if only_own and len(positions) > 0:
+        for _ in positions:
+            if positions[positions.index(_)].magic == MAGIC and DealComment.is_valid_string(_.comment):
+                result.append(_)
+    else:
+        result = positions
     return result
 
 
-def is_position_opened(lieder_position, investor):
+def is_position_opened(lieder_position):
     """Проверка позиции лидера на наличие в списке позиций и истории инвестора"""
-    init_mt(init_data=investor)
+    # init_mt(init_data=investor)
     invest_positions = get_investor_positions(only_own=False)
     if len(invest_positions) > 0:
         for pos in invest_positions:
             if DealComment.is_valid_string(pos.comment):
                 comment = DealComment().set_from_string(pos.comment)
-                if lieder_position.ticket == comment.lieder_ticket:
+                if lieder_position['ticket'] == comment.lieder_ticket:
                     return True
     return False
 
 
-async def open_position(symbol, deal_type, lot, sender_ticket: int, tp=0.0, sl=0.0):
+def open_position(symbol, deal_type, lot, sender_ticket: int, tp=0.0, sl=0.0):
     """Открытие позиции"""
     try:
         point = Mt.symbol_info(symbol).point
@@ -272,9 +268,10 @@ async def open_position(symbol, deal_type, lot, sender_ticket: int, tp=0.0, sl=0
     return result
 
 
-def close_position(investor, position, reason):
+def close_position(position, reason, investor=None):
     """Закрытие указанной позиции"""
-    init_mt(init_data=investor)
+    if investor:
+        init_mt(init_data=investor)
     tick = Mt.symbol_info_tick(position.symbol)
     if not tick:
         return
@@ -299,6 +296,34 @@ def close_position(investor, position, reason):
     result = Mt.order_send(request)
     # print(result)
     return result
+
+
+# def close_signal_position(signal, reason):
+#     """Закрытие указанной позиции"""
+#     tick = Mt.symbol_info_tick(signal['signal_symbol'])
+#     if not tick:
+#         return
+#     new_comment_str = position.comment
+#     if DealComment.is_valid_string(position.comment):
+#         comment = DealComment().set_from_string(position.comment)
+#         comment.reason = reason
+#         new_comment_str = comment.string()
+#     request = {
+#         'action': Mt.TRADE_ACTION_DEAL,
+#         'position': position.ticket,
+#         'symbol': position.symbol,
+#         'volume': position.volume,
+#         'type': Mt.ORDER_TYPE_BUY if position.type == 1 else Mt.ORDER_TYPE_SELL,
+#         'price': tick.ask if position.type == 1 else tick.bid,
+#         'deviation': DEVIATION,
+#         'magic:': MAGIC,
+#         'comment': new_comment_str,
+#         'type_tim': Mt.ORDER_TIME_GTC,
+#         'type_filing': Mt.ORDER_FILLING_IOC
+#     }
+#     result = Mt.order_send(request)
+#     # print(result)
+#     return result
 
 
 def force_close_all_positions(investor, reason):
@@ -331,3 +356,12 @@ def close_positions_by_lieder(investor, lieder_positions):
     for pos in non_existed_positions:
         print('     close position:', pos.comment)
         close_position(investor, pos, reason='06')
+
+
+def get_investor_position_for_signal(signal):
+    positions = get_investor_positions()
+    for _ in positions:
+        pos_comment = DealComment().set_from_string(_.comment)
+        if pos_comment.lieder_ticket == signal['ticket']:
+            return _
+    return None

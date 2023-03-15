@@ -147,7 +147,7 @@ UTC_OFFSET_TIMEDELTA = datetime.now() - datetime.utcnow()
 output_report = []  # сюда выводится отчет
 lieder_balance = 0  # default var
 lieder_equity = 0  # default var
-lieder_positions = []  # default var
+lieder_signals = []  # default var
 listed_signals = []  # default var
 investor_positions = {}  # default var
 old_investors_balance = []
@@ -841,7 +841,7 @@ async def update_setup():
 
 
 async def update_lieder_info(sleep=sleep_lieder_update):
-    global lieder_balance, lieder_equity, lieder_positions, source
+    global lieder_balance, lieder_equity, lieder_signals, source
     while True:
         if len(source) > 0:
             init_res = init_mt(init_data=source['lieder'])
@@ -884,7 +884,7 @@ async def execute_investor(investor):
     print(f' - {investor["login"]} - {len(Mt.positions_get())} positions. Access:', investor['dcs_access'])
     if investor['dcs_access']:
         execute_conditions(investor=investor)  # проверка условий кейса закрытия
-        for pos_lid in lieder_positions:
+        for pos_lid in lieder_signals:
             inv_tp = get_pips_tp(pos_lid)
             inv_sl = get_pips_sl(pos_lid)
             if not is_position_opened(pos_lid, investor):
@@ -920,7 +920,7 @@ async def execute_investor(investor):
     if investor['dcs_access'] or \
             (not investor['dcs_access']
              and investor['accompany_transactions'] == 'Да'):  # если сопровождать сделки или доступ есть
-        close_positions_by_lieder(positions_lieder=lieder_positions,
+        close_positions_by_lieder(positions_lieder=lieder_signals,
                                   positions_investor=Mt.positions_get())
 
     Mt.shutdown()
@@ -991,7 +991,7 @@ def create_signal_json(lieder_position, status):
 
 
 def send_signals():
-    global lieder_positions, listed_signals
+    global lieder_signals, listed_signals
     positions = lieder_positions
     listed = listed_signals
 
