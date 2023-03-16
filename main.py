@@ -1,14 +1,15 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import aiohttp
 from terminal import init_mt, get_lieder_positions, close_positions_by_lieder, open_position, send_retcodes, \
-    is_position_opened, close_position, get_investor_position_for_signal
+    is_position_opened, close_position, get_investor_position_for_signal, start_date, \
+    is_lieder_position_in_investor_history, get_investor_positions
 
 trading_event = asyncio.Event()  # init async event
 lieder_signals = []  # default var
 signals_settings = {}  # default var
 source = {}
-start_date = datetime.now().replace(microsecond=0)
+
 sleep_update = 3  # пауза для обновления лидера
 
 host = 'http://127.0.0.1:8000/api/'
@@ -198,46 +199,47 @@ async def send_lieder_signals(sleep=sleep_update):
                 trading_event.set()
             except Exception as e:
                 print('send_lieder_signals()', e)
+        print(
+            f'\n\tЛидер [{source["lieder"]["login"]}] {datetime.now().time()} - {len(lieder_signals)} активных сигнала')
         await asyncio.sleep(sleep)
 
 
 async def execute_investor(investor):
     investor_init_data, investor_settings, investor_id = get_investor_data(investor)
-
     if not init_mt(init_data=investor_init_data):
         return
-
     signal_list = synchronize_signal_list(investor, investor_settings)
+    # ---------------------------------------------------------------------------   Открытие
+    for signal in signal_list:
 
-    print(f'\tИнвестор [{investor["login"]}] {datetime.now().time()}')
-
-    for signal in signal_list:  # Открытие сделки
-
-        if signal['opening_deal'] in ['Пропуск', 'Не выбрано']:  # Пропустить открытие по сигналу
+        if signal['opening_deal'] in ['Пропуск', 'Не выбрано']:  # Пропустить по настройкам
+            continue
+        if is_position_opened(signal):  # Пропустить если уже открыта
+            continue
+        if is_lieder_position_in_investor_history(signal):  # Пропустить если уже была открыта (в истории)
+            print(f'\t\tПозиция по сигналу {signal["ticket"]} закрыта ранее инвестором [{investor["login"]}]')
+            continue
+        if not is_signal_actual(signal):  # Пропустить если сигнал неактуален
+            print(f'\t\tСигнал {signal["ticket"]} неактуален')
             continue
 
-        if not is_position_opened(signal):
+        response = open_position(symbol=signal['signal_symbol'], deal_type=signal['deal_type'],
+                                 lot=.01, sender_ticket=signal['ticket'])
+        if response:
+            try:
+                ret_code = response.retcode
+            except AttributeError:
+                ret_code = response['retcode']
+            if ret_code:
+                deal_type = 'BUY' if signal['deal_type'] == 0 else 'SELL'
+                msg = f'\t --- [{investor["login"]}] {deal_type} {send_retcodes[ret_code][1]}:{ret_code} : сигнал {signal["ticket"]}'
+                print(msg)
+        else:
+            print('EMPTY_RESPONSE_FOR_DEAL_OPEN')
+    # ---------------------------------------------------------------------------  Закрытие
+    for signal in signal_list:
 
-            if not is_signal_actual(signal):  # Проверка на актуальность
-                print(f'\t\tСигнал {signal["ticket"]} неактуален')
-                continue
-
-            response = open_position(symbol=signal['signal_symbol'], deal_type=signal['deal_type'],
-                                     lot=.01, sender_ticket=signal['ticket'])
-            if response:
-                try:
-                    ret_code = response.retcode
-                except AttributeError:
-                    ret_code = response['retcode']
-                if ret_code:
-                    msg = str(investor['login']) + ' ' + send_retcodes[ret_code][1] + ' : ' + str(ret_code)
-                    print(msg)
-            else:
-                print('EMPTY_RESPONSE_FOR_DEAL_OPEN')
-
-    for signal in signal_list:  # Закрытие сделки
-
-        if signal['closing_deal'] in ['Пропуск', 'Не выбрано']:  # Пропустить закрытие по сигналу
+        if signal['closing_deal'] in ['Пропуск', 'Не выбрано']:  # Пропустить по настройкам
             continue
 
         if signal['closing_deal'] == 'Закрыть':  # Ручное закрытие через инвест платформу
@@ -245,36 +247,10 @@ async def execute_investor(investor):
             if position:
                 close_position(position=position, reason='10')
 
-    # print(investor['login'], '-', len(source['signals'][investor_id]), 'signals')
-    # for _ in source['signals'][investor_id]:
-    #     print(source['signals'][investor_id].index(_), _)
-    # for lid_signal in lieder_signals:
-    #     inv_tp = get_pos_pips_tp(lid_signal)
-    #     inv_sl = get_pos_pips_sl(lid_signal)
-    #     init_mt(investor)
-    #     if not is_position_opened(lid_signal, investor):
-    #         ret_code = None
-    #         volume = 1.0
-    #
-    #         # min_lot = Mt.symbol_info(pos_lid.symbol).volume_min
-    #         # decimals = str(min_lot)[::-1].find('.')
-    #         response = await open_position(symbol=lid_signal.symbol, deal_type=lid_signal.type,
-    #                                        lot=volume, sender_ticket=lid_signal.ticket,
-    #                                        tp=inv_tp, sl=inv_sl)
-    #         if response:
-    #             try:
-    #                 ret_code = response.retcode
-    #             except AttributeError:
-    #                 ret_code = response['retcode']
-    #         if ret_code:
-    #             msg = str(investor['login']) + ' ' + send_retcodes[ret_code][1]  # + ' : ' + str(ret_code)
-    #             # if ret_code != 10009:  # Заявка выполнена
-    #             # await set_comment('\t' + msg)
-    #             print(msg)
+        # if signal['closing_deal'] == 'Закрыть':  # Ручное закрытие через инвест платформу
 
-    # закрытие позиций от лидера
-    # if True:
-    #     close_positions_by_lieder(investor, lieder_signals)
+    print(signal_list)
+    print(f'\tИнвестор [{investor["login"]}] {datetime.now().time()} - {len(get_investor_positions())} позиций')
 
 
 async def task_manager():

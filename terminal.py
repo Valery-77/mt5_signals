@@ -1,5 +1,7 @@
+from datetime import datetime, timedelta
 import MetaTrader5 as Mt
 from math import fabs
+
 
 send_retcodes = {
     -800: ('CUSTOM_RETCODE_NOT_ENOUGH_MARGIN', 'Уменьшите множитель или увеличьте сумму инвестиции'),
@@ -101,6 +103,8 @@ reasons_code = {
 TIMEOUT_INIT = 60_000  # время ожидания при инициализации терминала (рекомендуемое 60_000 millisecond)
 MAGIC = 9876543210  # идентификатор эксперта
 DEVIATION = 20  # допустимое отклонение цены в пунктах при совершении сделки
+start_date = datetime.now().replace(microsecond=0)
+SERVER_DELTA_TIME = timedelta(hours=0)
 
 
 class DealComment:
@@ -226,6 +230,25 @@ def is_position_opened(lieder_position):
     return False
 
 
+def is_lieder_position_in_investor_history(signal):
+    date_from = start_date + SERVER_DELTA_TIME
+    date_to = datetime.today().replace(microsecond=0) + timedelta(days=1)
+    # print(date_from, date_to)
+    deals = Mt.history_deals_get(date_from, date_to)
+    # print(deals)
+    if not deals:
+        deals = []
+    result = None
+    if len(deals) > 0:
+        for pos in deals:
+            if DealComment.is_valid_string(pos.comment):
+                comment = DealComment().set_from_string(pos.comment)
+                if signal['ticket'] == comment.lieder_ticket:
+                    result = pos
+                    break
+    return result
+
+
 def open_position(symbol, deal_type, lot, sender_ticket: int, tp=0.0, sl=0.0):
     """Открытие позиции"""
     try:
@@ -298,34 +321,6 @@ def close_position(position, reason, investor=None):
     return result
 
 
-# def close_signal_position(signal, reason):
-#     """Закрытие указанной позиции"""
-#     tick = Mt.symbol_info_tick(signal['signal_symbol'])
-#     if not tick:
-#         return
-#     new_comment_str = position.comment
-#     if DealComment.is_valid_string(position.comment):
-#         comment = DealComment().set_from_string(position.comment)
-#         comment.reason = reason
-#         new_comment_str = comment.string()
-#     request = {
-#         'action': Mt.TRADE_ACTION_DEAL,
-#         'position': position.ticket,
-#         'symbol': position.symbol,
-#         'volume': position.volume,
-#         'type': Mt.ORDER_TYPE_BUY if position.type == 1 else Mt.ORDER_TYPE_SELL,
-#         'price': tick.ask if position.type == 1 else tick.bid,
-#         'deviation': DEVIATION,
-#         'magic:': MAGIC,
-#         'comment': new_comment_str,
-#         'type_tim': Mt.ORDER_TIME_GTC,
-#         'type_filing': Mt.ORDER_FILLING_IOC
-#     }
-#     result = Mt.order_send(request)
-#     # print(result)
-#     return result
-
-
 def force_close_all_positions(investor, reason):
     """Принудительное закрытие всех позиций аккаунта"""
     init_res = init_mt(init_data=investor)
@@ -355,7 +350,7 @@ def close_positions_by_lieder(investor, lieder_positions):
                 non_existed_positions.append(ip)
     for pos in non_existed_positions:
         print('     close position:', pos.comment)
-        close_position(investor, pos, reason='06')
+        close_position(investor=investor, position=pos, reason='06')
 
 
 def get_investor_position_for_signal(signal):
