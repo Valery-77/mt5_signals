@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 import MetaTrader5 as Mt
-from math import fabs
-
+from math import fabs, floor
 
 send_retcodes = {
     -800: ('CUSTOM_RETCODE_NOT_ENOUGH_MARGIN', 'Уменьшите множитель или увеличьте сумму инвестиции'),
@@ -177,7 +176,27 @@ def init_mt(init_data):
     return result
 
 
-def get_pos_pips_tp(position, price=None):
+def get_signal_pips_tp(signal):
+    """Расчет Тейк-профит в пунктах"""
+    symbol = signal['signal_symbol']
+    level = signal['target_value']
+    price = signal['open_price']
+    result = 0.0
+    if level > 0:
+        result = round(fabs(price - level) / Mt.symbol_info(symbol).point)
+    return result
+
+
+def get_signal_pips_sl(signal):
+    """Расчет Стоп-лосс в пунктах"""
+    result = 0.0
+    if signal['stop_value'] > 0:
+        result = round(
+            fabs(signal['open_price'] - signal['stop_value']) / Mt.symbol_info(signal['signal_symbol']).point)
+    return result
+
+
+def get_position_pips_tp(position, price=None):
     """Расчет Тейк-профит в пунктах"""
     if price is None:
         price = position.price_open
@@ -187,7 +206,7 @@ def get_pos_pips_tp(position, price=None):
     return result
 
 
-def get_pos_pips_sl(position, price=None):
+def get_position_pips_sl(position, price=None):
     """Расчет Стоп-лосс в пунктах"""
     if price is None:
         price = position.price_open
@@ -353,6 +372,19 @@ def close_positions_by_lieder(investor, lieder_positions):
         close_position(investor=investor, position=pos, reason='06')
 
 
+def close_positions_for_signal(investor_init_data, signal):
+    """Закрытие позиций инвестора, которые закрылись у лидера"""
+    # print(investor_init_data[0]["login"])
+    init_mt(init_data=investor_init_data)
+    positions_investor = get_investor_positions()
+    if positions_investor:
+        for ip in positions_investor:
+            comment = DealComment().set_from_string(ip.comment)
+            if signal['ticket'] == comment.lieder_ticket:
+                close_position(position=ip, reason='06')
+                print(f'\t\t --- [{investor_init_data["login"]}] закрытие позиции:', ip.comment)
+
+
 def get_investor_position_for_signal(signal):
     positions = get_investor_positions()
     for _ in positions:
@@ -360,3 +392,74 @@ def get_investor_position_for_signal(signal):
         if pos_comment.lieder_ticket == signal['ticket']:
             return _
     return None
+
+
+def get_lots_for_investment(symbol, investment):
+    # investment = 1259
+    # smb = 'GBPUSD'
+    print(
+        f'\nsymbol: {symbol}')  # currency_base: {Mt.symbol_info(smb).currency_base}  currency_profit: {Mt.symbol_info(smb).currency_profit}  currency_margin: {Mt.symbol_info(smb).currency_margin}')
+    price = Mt.symbol_info_tick(symbol).bid
+    leverage = Mt.account_info().leverage
+    contract = Mt.symbol_info(symbol).trade_contract_size
+
+    min_lot = Mt.symbol_info(symbol).volume_min
+    lot_step = Mt.symbol_info(symbol).volume_step
+    decimals = str(lot_step)[::-1].find('.')
+
+    volume_none_round = (investment * leverage) / (contract * price)
+    # volume = floor((investment * leverage) / (contract * price) / lot_step) * lot_step
+    # print(floor((investment * leverage) / (contract * price) / lot_step), lot_step)
+    # print(f'Неокругленный объем: {volume_none_round}  Округленный объем: {volume}')
+    if volume_none_round < min_lot:
+        volume = 0.0
+    else:
+        volume = round(floor(volume_none_round / lot_step) * lot_step, decimals)
+
+    print(
+        f'Размер инвестиции: {investment}  Курс: {price}  Контракт: {contract}  Плечо: {leverage}  >>  ОБЪЕМ: {volume}')
+
+    # calc_margin = Mt.order_calc_margin(0, symbol, volume, price)
+    # print('Стоимость сделки:', calc_margin,
+    #       f' Остаток: {round(investment - calc_margin, 2)}' if calc_margin else 'Не хватает средств')
+    return volume
+
+
+def synchronize_position_limits(signal):
+    """Изменение уровней ТП и СЛ указанной позиции"""
+    i_pos = get_investor_position_for_signal(signal)
+    if not i_pos:
+        return
+    l_tp = get_signal_pips_tp(signal)
+    l_sl = get_signal_pips_sl(signal)
+    if l_tp > 0 or l_sl > 0:
+        request = []
+        new_comment_str = comment = ''
+        if DealComment.is_valid_string(i_pos.comment):
+            comment = DealComment().set_from_string(i_pos.comment)
+            comment.reason = '09'
+            new_comment_str = comment.string()
+        if comment.lieder_ticket == signal['ticket']:
+            i_tp = get_position_pips_tp(i_pos)
+            i_sl = get_position_pips_sl(i_pos)
+            sl_lvl = tp_lvl = 0.0
+            point = Mt.symbol_info(i_pos.symbol).point
+            if i_pos.type == Mt.POSITION_TYPE_BUY:
+                sl_lvl = i_pos.price_open - l_sl * point if l_sl > 0 else 0.0
+                tp_lvl = i_pos.price_open + l_tp * point if l_tp > 0 else 0.0
+            elif i_pos.type == Mt.POSITION_TYPE_SELL:
+                sl_lvl = i_pos.price_open + l_sl * point if l_sl > 0 else 0.0
+                tp_lvl = i_pos.price_open - l_tp * point if l_tp > 0 else 0.0
+            if i_tp != l_tp or i_sl != l_sl:
+                request = {
+                    "action": Mt.TRADE_ACTION_SLTP,
+                    "position": i_pos.ticket,
+                    "symbol": i_pos.symbol,
+                    "sl": sl_lvl,
+                    "tp": tp_lvl,
+                    "magic": MAGIC,
+                    "comment": new_comment_str
+                }
+        if request:
+            result = Mt.order_send(request)
+            print('Изменение лимитов::', result)

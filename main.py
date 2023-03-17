@@ -1,12 +1,11 @@
 import asyncio
-from datetime import datetime, timedelta
-import aiohttp
-from terminal import init_mt, get_lieder_positions, close_positions_by_lieder, open_position, send_retcodes, \
-    is_position_opened, close_position, get_investor_position_for_signal, start_date, \
-    is_lieder_position_in_investor_history, get_investor_positions
+from math import floor
 
-trading_event = asyncio.Event()  # init async event
-lieder_signals = []  # default var
+import aiohttp
+from terminal import *
+
+signals_exist_event = asyncio.Event()  # init async event
+exist_lieder_signals = new_lieder_signals = []  # default var
 signals_settings = {}  # default var
 source = {}
 
@@ -45,16 +44,15 @@ def get_investor_id(investor):
 def get_investor_data(investor):
     idx = get_investor_id(investor)
     if idx < 0:
-        return {}, {}
+        return {}, {}, idx
     else:
         init_data = {'login': source['investors'][idx]['login'],
                      'server': source['investors'][idx]['server'],
                      'password': source['investors'][idx]['password'],
                      'terminal_path': source['terminals_path'][idx]}
         settings = {'multiplier': source['investors'][idx]['multiplier'],
+                    'investment': source['investors'][idx]['investment'],
                     'state': source['investors'][idx]['state'],
-                    'target_value': source['investors'][idx]['target_value'],
-                    'stop_value': source['investors'][idx]['stop_value'],
                     'opening_deal': source['investors'][idx]['opening_deal'],
                     'closing_deal': source['investors'][idx]['closing_deal'],
                     'target_and_stop': source['investors'][idx]['target_and_stop'],
@@ -70,7 +68,7 @@ def create_signal_json(lieder_position, status):
             'current_price': lieder_position.price_current,
             'signal_symbol': lieder_position.symbol,
             'open_price': lieder_position.price_open,
-            'goal': lieder_position.tp,
+            'target_value': lieder_position.tp,
             'stop_value': lieder_position.sl,
             'profitability': lieder_position.profit,
             'status': status, }
@@ -85,7 +83,7 @@ def create_signal_json(lieder_position, status):
     # 'draw_down': -1}
 
 
-def is_signal_actual(signal_item):
+def is_signal_relevance(signal_item):
     price_open = signal_item['open_price']
     price_current = signal_item['current_price']
     deviation = signal_item['signal_relevance']
@@ -119,8 +117,8 @@ async def get_settings(sleep=sleep_update):
                                    'investment': signals_settings['investment_1'],
                                    'multiplier': signals_settings['multiplier'],
                                    'state': signals_settings['state'],
-                                   'target_value': signals_settings['target_value'],
-                                   'stop_value': signals_settings['stop_value'],
+                                   # 'target_value': signals_settings['target_value'],
+                                   # 'stop_value': signals_settings['stop_value'],
                                    'opening_deal': signals_settings['opening_deal'],
                                    'closing_deal': signals_settings['closing_deal'],
                                    'target_and_stop': signals_settings['target_and_stop'],
@@ -128,6 +126,7 @@ async def get_settings(sleep=sleep_update):
                                    'risk': signals_settings['risk'],
                                    'profit': signals_settings['profit'],
                                    'signal_relevance': signals_settings['signal_relevance']}
+
             source['investors'].append(investor_data_first)
             investor_data_second = investor_data_first.copy()
             investor_data_second['login'] = signals_settings['investor_login_2']
@@ -142,7 +141,8 @@ async def get_settings(sleep=sleep_update):
 
 def synchronize_signal_list(investor, settings):
     investor_id = get_investor_id(investor)
-    for signal in lieder_signals:
+    for signal_ in new_lieder_signals:
+        signal = signal_.copy()
         signal.update(settings)  # сложить данные о сигнале лидера и настроек инвестора
 
         if len(source['signals']) - 1 < investor_id:
@@ -158,16 +158,17 @@ def synchronize_signal_list(investor, settings):
 
         if exist_signal_id < 0:  # Если сигнал не найден, добавить в список
             source['signals'][investor_id].append(signal)
-        else:  # Иначе обновить цену и профит сигнала
+        else:  # Иначе обновить цену, лимиты и профит сигнала
             source['signals'][investor_id][exist_signal_id]['current_price'] = signal['current_price']
             source['signals'][investor_id][exist_signal_id]['profitability'] = signal['profitability']
-
+            source['signals'][investor_id][exist_signal_id]['target_value'] = signal['target_value']
+            source['signals'][investor_id][exist_signal_id]['stop_value'] = signal['stop_value']
     investor_signals = source['signals'][investor_id]  # удалить отсутствующие сигналы лидера
     for inv_signal in investor_signals:
         exist_signal_id = -1
-        for lid_signal in lieder_signals:
+        for lid_signal in new_lieder_signals:
             if inv_signal['ticket'] == lid_signal['ticket']:
-                exist_signal_id = lieder_signals.index(lid_signal)
+                exist_signal_id = new_lieder_signals.index(lid_signal)
                 break
         if exist_signal_id < 0:
             investor_signals.remove(investor_signals[investor_signals.index(inv_signal)])
@@ -175,32 +176,56 @@ def synchronize_signal_list(investor, settings):
 
 
 async def send_lieder_signals(sleep=sleep_update):
-    global lieder_signals
+    global exist_lieder_signals, new_lieder_signals
     url_post = host + 'create_signal'
     while True:
         lieder_positions = get_lieder_positions(lieder_init_data=source['lieder'])
-        lieder_signals = []
+        new_lieder_signals = []
+
         if lieder_positions:
             try:
-                for position in lieder_positions:
+                for position in lieder_positions:  # Коллекция существующих сигналов
                     data_json = create_signal_json(position, True)
-                    lieder_signals.append(data_json)
+                    new_lieder_signals.append(data_json)
+
+                for new_signal in new_lieder_signals:  # Отправка сигналов на сервер
                     async with aiohttp.ClientSession() as session:
-                        async with session.post(url=url_post, data=data_json) as resp_post:
+                        async with session.post(url=url_post, data=new_signal) as resp_post:
                             await resp_post.json()
-                            if resp_post.status == 400:
-                                url = host + f'update_signal/{data_json["ticket"]}'
-                                data = {'current_price': data_json['current_price'],
-                                        'profitability': data_json['profitability']}
+                            if resp_post.status == 400:  # Если такой сигнал существует, обновить данные
+                                url = host + f'update_signal/{new_signal["ticket"]}'
+                                data = {'current_price': new_signal['current_price'],
+                                        'target_value': new_signal['target_value'],
+                                        'stop_value': new_signal['stop_value'],
+                                        'profitability': new_signal['profitability']}
                                 async with session.patch(url=url, data=data) as resp_patch:
                                     await resp_patch.json()
-                            # if resp_post.status == 200 or resp_patch.status == 200:
-                            #     lid_positions.remove(position)
-                trading_event.set()
+                signals_exist_event.set()
             except Exception as e:
                 print('send_lieder_signals()', e)
+        # ---------------------------------------------------------------------------   Закрытие сигналов
+        for old_signal in exist_lieder_signals:  # Отправка статуса
+            signal_exist = False
+            for new_signal in new_lieder_signals:
+                if old_signal['ticket'] == new_signal['ticket']:
+                    signal_exist = True
+                    break
+            if not signal_exist:
+                for investor in source['investors']:
+                    init_data, settings, idx = get_investor_data(investor)
+                    if settings['closing_deal'] == 'Сопровождение':  # Закрыть позиции если 'Сопровождать закрытие'
+                        close_positions_for_signal(init_data, old_signal)
+
+                async with aiohttp.ClientSession() as session:  # Отправить в базу
+                    url = host + f'update_signal/{old_signal["ticket"]}'
+                    data = {'status': False, 'close_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                    async with session.patch(url=url, data=data) as resp_patch:
+                        await resp_patch.json()
+
+        exist_lieder_signals = new_lieder_signals.copy()
+
         print(
-            f'\n\tЛидер [{source["lieder"]["login"]}] {datetime.now().time()} - {len(lieder_signals)} активных сигнала')
+            f'\n\tЛидер [{source["lieder"]["login"]}] {datetime.now().time()} - {len(new_lieder_signals)} сигнал')
         await asyncio.sleep(sleep)
 
 
@@ -208,6 +233,7 @@ async def execute_investor(investor):
     investor_init_data, investor_settings, investor_id = get_investor_data(investor)
     if not init_mt(init_data=investor_init_data):
         return
+
     signal_list = synchronize_signal_list(investor, investor_settings)
     # ---------------------------------------------------------------------------   Открытие
     for signal in signal_list:
@@ -219,12 +245,18 @@ async def execute_investor(investor):
         if is_lieder_position_in_investor_history(signal):  # Пропустить если уже была открыта (в истории)
             print(f'\t\tПозиция по сигналу {signal["ticket"]} закрыта ранее инвестором [{investor["login"]}]')
             continue
-        if not is_signal_actual(signal):  # Пропустить если сигнал неактуален
+        if not is_signal_relevance(signal):  # Пропустить если сигнал неактуален
             print(f'\t\tСигнал {signal["ticket"]} неактуален')
             continue
 
+        if signal['opening_deal'] == 'Сопровождение' or signal['target_and_stop'] == 'Выставлять':
+            tp = get_signal_pips_tp(signal)
+            sl = get_signal_pips_sl(signal)
+        else:
+            tp = sl = 0.0
+        volume = .01  # get_lots_for_investment(signal['signal_symbol'], signal['investment'])
         response = open_position(symbol=signal['signal_symbol'], deal_type=signal['deal_type'],
-                                 lot=.01, sender_ticket=signal['ticket'])
+                                 lot=volume, sender_ticket=signal['ticket'], tp=tp, sl=sl)
         if response:
             try:
                 ret_code = response.retcode
@@ -236,6 +268,13 @@ async def execute_investor(investor):
                 print(msg)
         else:
             print('EMPTY_RESPONSE_FOR_DEAL_OPEN')
+    # ---------------------------------------------------------------------------  Сопровождение
+    for signal in signal_list:
+
+        # Коррекция Тейк-профит и Стоп-лосс
+        if signal['opening_deal'] == 'Сопровождение' or signal['target_and_stop'] == 'Выставлять':
+            synchronize_position_limits(signal=signal)
+
     # ---------------------------------------------------------------------------  Закрытие
     for signal in signal_list:
 
@@ -247,21 +286,18 @@ async def execute_investor(investor):
             if position:
                 close_position(position=position, reason='10')
 
-        # if signal['closing_deal'] == 'Закрыть':  # Ручное закрытие через инвест платформу
-
-    print(signal_list)
     print(f'\tИнвестор [{investor["login"]}] {datetime.now().time()} - {len(get_investor_positions())} позиций')
 
 
 async def task_manager():
     while True:
-        await trading_event.wait()
+        await signals_exist_event.wait()
 
         if len(source['investors']) > 0:
             for _ in source['investors']:
                 event_loop.create_task(execute_investor(_))
 
-        trading_event.clear()
+        signals_exist_event.clear()
 
 
 if __name__ == '__main__':
