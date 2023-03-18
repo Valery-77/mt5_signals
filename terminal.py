@@ -268,7 +268,7 @@ def is_lieder_position_in_investor_history(signal):
     return result
 
 
-def open_position(symbol, deal_type, lot, sender_ticket: int, tp=0.0, sl=0.0):
+def open_position(symbol, deal_type, lot, lieder_position_ticket: int, tp=0.0, sl=0.0):
     """Открытие позиции"""
     try:
         point = Mt.symbol_info(symbol).point
@@ -290,7 +290,7 @@ def open_position(symbol, deal_type, lot, sender_ticket: int, tp=0.0, sl=0.0):
     except AttributeError:
         return {'retcode': -200}
     comment = DealComment()
-    comment.lieder_ticket = sender_ticket
+    comment.lieder_ticket = lieder_position_ticket
     comment.reason = '01'
     request = {
         "action": Mt.TRADE_ACTION_DEAL,
@@ -372,17 +372,21 @@ def close_positions_by_lieder(investor, lieder_positions):
         close_position(investor=investor, position=pos, reason='06')
 
 
-def close_positions_for_signal(investor_init_data, signal):
-    """Закрытие позиций инвестора, которые закрылись у лидера"""
-    # print(investor_init_data[0]["login"])
-    init_mt(init_data=investor_init_data)
+def close_signal_position(signal, reason):
+    """Закрытие позиции инвестора"""
     positions_investor = get_investor_positions()
     if positions_investor:
         for ip in positions_investor:
             comment = DealComment().set_from_string(ip.comment)
             if signal['ticket'] == comment.lieder_ticket:
-                close_position(position=ip, reason='06')
-                print(f'\t\t --- [{investor_init_data["login"]}] закрытие позиции:', ip.comment)
+                close_position(position=ip, reason=reason)
+
+
+def close_investor_positions(signal_list):
+    """Закрытие позиций инвесторов по сопровождению"""
+    for signal in signal_list:
+        if signal['opening_deal'] == 'Сопровождение' or signal['closing_deal'] == 'Сопровождение':
+            close_signal_position(signal=signal, reason='06')
 
 
 def get_investor_position_for_signal(signal):
