@@ -260,6 +260,9 @@ async def execute_investor(investor):
 
         if signal['opening_deal'] in ['Пропуск', 'Не выбрано']:  # Пропустить по настройкам
             continue
+        if not is_symbol_allow(signal['signal_symbol']):    # Пропустить если символ недоступен
+            print(f'\t\tСимвол {signal["signal_symbol"]} недоступен')
+            continue
         if is_position_opened(signal):  # Пропустить если уже открыта
             continue
         if is_lieder_position_in_investor_history(signal):  # Пропустить если уже была открыта (в истории)
@@ -267,9 +270,6 @@ async def execute_investor(investor):
             continue
         if not is_signal_relevance(signal):  # Пропустить если сигнал неактуален
             print(f'\t\tСигнал {signal["ticket"]} неактуален')
-            continue
-        if not is_symbol_allow(signal['signal_symbol']):    # Пропустить если символ недоступен
-            print(f'\t\tСимвол {signal["signal_symbol"]} недоступен')
             continue
         if signal['opening_deal'] == 'Сопровождение' or signal['target_and_stop'] == 'Выставлять':
             tp = get_signal_pips_tp(signal)
