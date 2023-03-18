@@ -268,7 +268,9 @@ async def execute_investor(investor):
         if not is_signal_relevance(signal):  # Пропустить если сигнал неактуален
             print(f'\t\tСигнал {signal["ticket"]} неактуален')
             continue
-
+        if not is_symbol_allow(signal['signal_symbol']):    # Пропустить если символ недоступен
+            print(f'\t\tСимвол {signal["signal_symbol"]} недоступен')
+            continue
         if signal['opening_deal'] == 'Сопровождение' or signal['target_and_stop'] == 'Выставлять':
             tp = get_signal_pips_tp(signal)
             sl = get_signal_pips_sl(signal)

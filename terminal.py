@@ -467,3 +467,18 @@ def synchronize_position_limits(signal):
         if request:
             result = Mt.order_send(request)
             print('Изменение лимитов::', result)
+
+
+def is_symbol_allow(symbol):
+    all_symbols = Mt.symbols_get()
+    symbol_names = []
+    for symbol_ in all_symbols:
+        symbol_names.append(symbol_.name)
+
+    if symbol in symbol_names:
+        if Mt.symbol_select(symbol, True):
+            return True
+        else:
+            return False
+    else:
+        return False
