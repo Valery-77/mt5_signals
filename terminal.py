@@ -87,16 +87,14 @@ last_errors = {
     -10003: ('RES_E_INTERNAL_FAIL_CONNECT', 'internal IPC no ipc'),
     -10005: ('RES_E_INTERNAL_FAIL_TIMEOUT', 'internal timeout')}
 reasons_code = {
-    '01': 'Открыто СКС',
-    '02': 'Блеклист',
-    '03': 'Закрыто по команде пользователя',
-    '04': 'Ключ APi истек',
-    '05': 'Нет связи с биржей',
-    '06': 'Закрыто инвестором',
-    '07': 'Закрыто по условию стоп-лосс',
-    '08': 'Объем изменен',
-    '09': 'Лимиты изменены',
-    '10': 'Ручное закрытие через инвест платформу',
+    '001': 'Открыто Системой сигналов',
+    '002': 'Ручное закрытие через инвест платформу',
+    '003': 'Закрыто Лидером',
+    '004': 'Лимиты изменены',
+    # '03': 'Закрыто по команде пользователя',
+    # '06': 'Закрыто инвестором',
+    # '09': 'Лимиты изменены',
+    # '10': 'Ручное закрытие через инвест платформу',
 }
 
 TIMEOUT_INIT = 60_000  # время ожидания при инициализации терминала (рекомендуемое 60_000 millisecond)
@@ -291,7 +289,7 @@ def open_position(symbol, deal_type, lot, lieder_position_ticket: int, tp=0.0, s
         return {'retcode': -200}
     comment = DealComment()
     comment.lieder_ticket = lieder_position_ticket
-    comment.reason = '01'
+    comment.reason = '001'
     request = {
         "action": Mt.TRADE_ACTION_DEAL,
         "symbol": symbol,
@@ -306,14 +304,15 @@ def open_position(symbol, deal_type, lot, lieder_position_ticket: int, tp=0.0, s
         "type_time": Mt.ORDER_TIME_GTC,
         "type_filling": Mt.ORDER_FILLING_FOK,
     }
+    print(request)
     result = Mt.order_send(request)
     return result
 
 
-def close_position(position, reason, investor=None):
+def close_position(investor, position, reason):
     """Закрытие указанной позиции"""
-    if investor:
-        init_mt(init_data=investor)
+    # if investor:
+    #     init_mt(init_data=investor)
     tick = Mt.symbol_info_tick(position.symbol)
     if not tick:
         return
@@ -336,7 +335,9 @@ def close_position(position, reason, investor=None):
         'type_filing': Mt.ORDER_FILLING_IOC
     }
     result = Mt.order_send(request)
-    # print(result)
+    if comment:
+        print(
+            f'\t\t -- [{investor["login"]}] - {comment.lieder_ticket} {reasons_code[reason]} - {send_retcodes[result.retcode][1]}')
     return result
 
 
@@ -441,7 +442,7 @@ def synchronize_position_limits(signal):
         new_comment_str = comment = ''
         if DealComment.is_valid_string(i_pos.comment):
             comment = DealComment().set_from_string(i_pos.comment)
-            comment.reason = '09'
+            comment.reason = '004'
             new_comment_str = comment.string()
         if comment.lieder_ticket == signal['ticket']:
             i_tp = get_position_pips_tp(i_pos)
