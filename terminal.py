@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 import MetaTrader5 as Mt
-from math import fabs, floor
+from math import fabs
 
 send_retcodes = {
     -800: ('CUSTOM_RETCODE_NOT_ENOUGH_MARGIN', 'Уменьшите множитель или увеличьте сумму инвестиции'),
@@ -304,8 +304,9 @@ def open_position(symbol, deal_type, lot, lieder_position_ticket: int, tp=0.0, s
         "type_time": Mt.ORDER_TIME_GTC,
         "type_filling": Mt.ORDER_FILLING_FOK,
     }
-    print(request)
     result = Mt.order_send(request)
+    if result.retcode != 10009:
+        print('request:', request, '\n', 'result:', result)
     return result
 
 
@@ -335,7 +336,7 @@ def close_position(investor, position, reason):
         'type_filing': Mt.ORDER_FILLING_IOC
     }
     result = Mt.order_send(request)
-    if comment:
+    if comment and investor:
         print(
             f'\t\t -- [{investor["login"]}] - {comment.lieder_ticket} {reasons_code[reason]} - {send_retcodes[result.retcode][1]}')
     return result
@@ -380,7 +381,7 @@ def close_signal_position(signal, reason):
         for ip in positions_investor:
             comment = DealComment().set_from_string(ip.comment)
             if signal['ticket'] == comment.lieder_ticket:
-                close_position(position=ip, reason=reason)
+                close_position(position=ip, reason=reason, investor=None)
 
 
 def close_investor_positions(signal_list):
@@ -399,35 +400,35 @@ def get_investor_position_for_signal(signal):
     return None
 
 
-def get_lots_for_investment(symbol, investment):
-    # investment = 1259
-    # smb = 'GBPUSD'
-    print(
-        f'\nsymbol: {symbol}')  # currency_base: {Mt.symbol_info(smb).currency_base}  currency_profit: {Mt.symbol_info(smb).currency_profit}  currency_margin: {Mt.symbol_info(smb).currency_margin}')
-    price = Mt.symbol_info_tick(symbol).bid
-    leverage = Mt.account_info().leverage
-    contract = Mt.symbol_info(symbol).trade_contract_size
-
-    min_lot = Mt.symbol_info(symbol).volume_min
-    lot_step = Mt.symbol_info(symbol).volume_step
-    decimals = str(lot_step)[::-1].find('.')
-
-    volume_none_round = (investment * leverage) / (contract * price)
-    # volume = floor((investment * leverage) / (contract * price) / lot_step) * lot_step
-    # print(floor((investment * leverage) / (contract * price) / lot_step), lot_step)
-    # print(f'Неокругленный объем: {volume_none_round}  Округленный объем: {volume}')
-    if volume_none_round < min_lot:
-        volume = 0.0
-    else:
-        volume = round(floor(volume_none_round / lot_step) * lot_step, decimals)
-
-    print(
-        f'Размер инвестиции: {investment}  Курс: {price}  Контракт: {contract}  Плечо: {leverage}  >>  ОБЪЕМ: {volume}')
-
-    # calc_margin = Mt.order_calc_margin(0, symbol, volume, price)
-    # print('Стоимость сделки:', calc_margin,
-    #       f' Остаток: {round(investment - calc_margin, 2)}' if calc_margin else 'Не хватает средств')
-    return volume
+# def get_lots_for_investment(symbol, investment):
+#     # investment = 1259
+#     # smb = 'GBPUSD'
+#     print(
+#         f'\nsymbol: {symbol}')  # currency_base: {Mt.symbol_info(smb).currency_base}  currency_profit: {Mt.symbol_info(smb).currency_profit}  currency_margin: {Mt.symbol_info(smb).currency_margin}')
+#     price = Mt.symbol_info_tick(symbol).bid
+#     leverage = Mt.account_info().leverage
+#     contract = Mt.symbol_info(symbol).trade_contract_size
+#
+#     min_lot = Mt.symbol_info(symbol).volume_min
+#     lot_step = Mt.symbol_info(symbol).volume_step
+#     decimals = str(lot_step)[::-1].find('.')
+#
+#     volume_none_round = (investment * leverage) / (contract * price)
+#     # volume = floor((investment * leverage) / (contract * price) / lot_step) * lot_step
+#     # print(floor((investment * leverage) / (contract * price) / lot_step), lot_step)
+#     # print(f'Неокругленный объем: {volume_none_round}  Округленный объем: {volume}')
+#     if volume_none_round < min_lot:
+#         volume = 0.0
+#     else:
+#         volume = round(floor(volume_none_round / lot_step) * lot_step, decimals)
+#
+#     print(
+#         f'Размер инвестиции: {investment}  Курс: {price}  Контракт: {contract}  Плечо: {leverage}  >>  ОБЪЕМ: {volume}')
+#
+#     # calc_margin = Mt.order_calc_margin(0, symbol, volume, price)
+#     # print('Стоимость сделки:', calc_margin,
+#     #       f' Остаток: {round(investment - calc_margin, 2)}' if calc_margin else 'Не хватает средств')
+#     return volume
 
 
 def synchronize_position_limits(signal):
@@ -483,3 +484,17 @@ def is_symbol_allow(symbol):
             return False
     else:
         return False
+
+
+def get_deal_volume(signal):
+    investment_size = signal['investment'] * signal['multiplier']
+    lieder_leverage = signal['deal_leverage']
+    symbol = signal['signal_symbol']
+    info_tick = Mt.symbol_info_tick(symbol)
+    investor_price = info_tick.ask if signal['deal_type'] == 0 else info_tick.bid
+    info_symbol = Mt.symbol_info(symbol)
+    contract_size = info_symbol.trade_contract_size
+    lot_step = info_symbol.volume_step
+    decimals = str(lot_step)[::-1].find('.')
+    result = round(investment_size * lieder_leverage / investor_price / contract_size, decimals)
+    return result

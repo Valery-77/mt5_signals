@@ -1,5 +1,6 @@
 import asyncio
 
+import MetaTrader5
 import aiohttp
 from terminal import *
 
@@ -61,16 +62,24 @@ def get_investor_data(investor):
         return init_data, settings, idx
 
 
-def create_signal_json(lieder_position, status):
+def create_signal_json(lieder_balance, lieder_position):
+    #   расчет плеча сделки лидера
+    contract_size = Mt.symbol_info(lieder_position.symbol).trade_contract_size
+    if contract_size and lieder_balance > 0:
+        leverage = (contract_size * lieder_position.volume * lieder_position.price_open) / lieder_balance
+    else:
+        leverage = 0
+    #   тело запроса
     return {'ticket': lieder_position.ticket,
             'deal_type': lieder_position.type,
             'current_price': lieder_position.price_current,
+            'deal_leverage': leverage,
             'signal_symbol': lieder_position.symbol,
             'open_price': lieder_position.price_open,
             'target_value': lieder_position.tp,
             'stop_value': lieder_position.sl,
             'profitability': lieder_position.profit,
-            'status': status, }
+            'status': True, }
     # 'type_ticket': '???',
     # 'pattern': 'Из стратегии',
     # 'signal_class': 'Из стратегии',
@@ -196,10 +205,10 @@ async def execute_lieder(sleep=sleep_update):
 
         if lieder_positions:
             try:
+                balance = Mt.account_info().balance
                 for position in lieder_positions:  # Коллекция существующих сигналов
-                    data_json = create_signal_json(position, True)
+                    data_json = create_signal_json(balance, position)
                     new_lieder_signals.append(data_json)
-
                 for new_signal in new_lieder_signals:  # Отправка сигналов на сервер
                     async with aiohttp.ClientSession() as session:
                         async with session.post(url=url_post, data=new_signal) as resp_post:
@@ -213,7 +222,7 @@ async def execute_lieder(sleep=sleep_update):
                                 async with session.patch(url=url, data=data) as resp_patch:
                                     await resp_patch.json()
             except Exception as e:
-                print('send_lieder_signals()', e)
+                print('execute_lieder()', e)
 
         await disable_closed_positions_signals()  # ----------------------------   Закрытие сигналов
 
@@ -228,19 +237,22 @@ def execute_investor(investor, new_signals_list):
         return
 
     print(f'\tИнвестор [{investor["login"]}] {datetime.now().time()} - {len(get_investor_positions())} позиций')
-    #   ---------------------------------------------------------------------------     Закрытие позиций по инвестору
+    #   ---------------------------------------------------------------------------     Объединение сигналов и настроек
+    signal_list = unite_signals_list(new_signals_list, settings_signal)
+    #   ---------------------------------------------------------------------------     Закрытие позиций по Сопровождению
     exist_positions = get_investor_positions()
     for e_pos in exist_positions:
         comment = DealComment().set_from_string(e_pos.comment)
         position_exist = False
-        for signal in new_signals_list:
+        for signal in signal_list:
+            print(signal['closing_deal'])
+            if signal['closing_deal'] != 'Сопровождение':
+                continue
             if signal['ticket'] == comment.lieder_ticket:
                 position_exist = True
                 break
         if not position_exist:
             close_position(investor=investor, position=e_pos, reason='003')
-    #   ---------------------------------------------------------------------------     Объединение сигналов и настроек
-    signal_list = unite_signals_list(new_signals_list, settings_signal)
     #   ---------------------------------------------------------------------------     Открытие
     for signal in signal_list:
 
@@ -262,10 +274,9 @@ def execute_investor(investor, new_signals_list):
             sl = get_signal_pips_sl(signal)
         else:
             tp = sl = 0.0
-        volume = .01  # get_lots_for_investment(signal['signal_symbol'], signal['investment'])
+        volume = get_deal_volume(signal)
         response = open_position(symbol=signal['signal_symbol'], deal_type=signal['deal_type'],
                                  lot=volume, lieder_position_ticket=signal['ticket'], tp=tp, sl=sl)
-        # print(response)
         if response:
             try:
                 ret_code = response.retcode
