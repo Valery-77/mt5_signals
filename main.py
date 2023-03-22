@@ -52,17 +52,19 @@ def get_investor_data(investor):
                      'terminal_path': source['terminals_path'][idx]}
         settings = {'multiplier': source['investors'][idx]['multiplier'],
                     'investment': source['investors'][idx]['investment'],
-                    'state': source['investors'][idx]['state'],
+                    # 'state': investor_signals_list[idx]['status'] if len(investor_signals_list) > idx else False,
+                    # source['investors'][idx]['state'],
                     'opening_deal': source['investors'][idx]['opening_deal'],
                     'closing_deal': source['investors'][idx]['closing_deal'],
                     'target_and_stop': source['investors'][idx]['target_and_stop'],
                     'risk': source['investors'][idx]['risk'],
                     'signal_relevance': source['investors'][idx]['signal_relevance'],
+                    'profitability': source['investors'][idx]['profitability'],
                     'profit': source['investors'][idx]['profit']}
         return init_data, settings, idx
 
 
-def create_signal_json(lieder_balance, lieder_position):
+def create_position_signal_json(lieder_balance, lieder_position):
     #   расчет плеча сделки лидера
     contract_size = Mt.symbol_info(lieder_position.symbol).trade_contract_size
     if contract_size and lieder_balance > 0:
@@ -78,8 +80,8 @@ def create_signal_json(lieder_balance, lieder_position):
             'open_price': lieder_position.price_open,
             'target_value': lieder_position.tp,
             'stop_value': lieder_position.sl,
-            'profitability': lieder_position.profit,
             'status': True, }
+    # 'profitability': lieder_position.profit,
     # 'type_ticket': '???',
     # 'pattern': 'Из стратегии',
     # 'signal_class': 'Из стратегии',
@@ -123,7 +125,7 @@ async def get_investor_settings(sleep=sleep_update):
                                    'server': signals_settings['investor_server_1'],
                                    'investment': signals_settings['investment_1'],
                                    'multiplier': signals_settings['multiplier'],
-                                   'state': signals_settings['state'],
+                                   # 'state': signals_settings['state'],
                                    'opening_deal': signals_settings['opening_deal'],
                                    'closing_deal': signals_settings['closing_deal'],
                                    'target_and_stop': signals_settings['target_and_stop'],
@@ -207,7 +209,7 @@ async def execute_lieder(sleep=sleep_update):
             try:
                 balance = Mt.account_info().balance
                 for position in lieder_positions:  # Коллекция существующих сигналов
-                    data_json = create_signal_json(balance, position)
+                    data_json = create_position_signal_json(balance, position)
                     new_lieder_signals.append(data_json)
                 for new_signal in new_lieder_signals:  # Отправка сигналов на сервер
                     async with aiohttp.ClientSession() as session:
@@ -217,8 +219,7 @@ async def execute_lieder(sleep=sleep_update):
                                 url = host + f'update_signal/{new_signal["ticket"]}'
                                 data = {'current_price': new_signal['current_price'],
                                         'target_value': new_signal['target_value'],
-                                        'stop_value': new_signal['stop_value'],
-                                        'profitability': new_signal['profitability']}
+                                        'stop_value': new_signal['stop_value'], }
                                 async with session.patch(url=url, data=data) as resp_patch:
                                     await resp_patch.json()
             except Exception as e:
@@ -245,7 +246,6 @@ def execute_investor(investor, new_signals_list):
         comment = DealComment().set_from_string(e_pos.comment)
         position_exist = False
         for signal in signal_list:
-            print(signal['closing_deal'])
             if signal['closing_deal'] != 'Сопровождение':
                 continue
             if signal['ticket'] == comment.lieder_ticket:
@@ -297,14 +297,23 @@ def execute_investor(investor, new_signals_list):
 
     #   ---------------------------------------------------------------------------     Закрытие
     for signal in signal_list:
-
         if signal['closing_deal'] in ['Пропуск', 'Не выбрано']:  # Пропустить по настройкам
             continue
 
         if signal['closing_deal'] == 'Закрыть':  # Ручное закрытие через инвест платформу
-            position = get_investor_position_for_signal(signal)
-            if position:
-                close_position(investor=investor, position=position, reason='002')
+            close_signal_position(signal=signal, reason='002')
+            # position = get_investor_position_for_signal(signal)
+            # if position:
+            #     close_position(investor=investor, position=position, reason='002')
+
+        if is_risk_achieved(signal):  # Риск
+            close_signal_position(signal=signal, reason='005')
+
+        if is_profitability_achieved(signal):  # Доходность
+            close_signal_position(signal=signal, reason='006')
+
+        if is_profit_achieved(signal):  # Прибыль
+            close_signal_position(signal=signal, reason='007')
 
 
 def investors_executor():
