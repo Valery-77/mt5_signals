@@ -172,8 +172,10 @@ def init_mt(init_data):
     """Инициализация терминала"""
     result = Mt.initialize(login=init_data['login'], server=init_data['server'], password=init_data['password'],
                            path=init_data['terminal_path'], timeout=TIMEOUT_INIT)
-    if not result:
-        print(f'\t !!! {init_data["login"]} - Ошибка инициализации - {init_data["terminal_path"]}')
+    # Mt.login(login=init_data['login'], server=init_data['server'], password=init_data['password'],
+    #          path=init_data['terminal_path'], timeout=TIMEOUT_INIT)
+    # if not result:
+    # print(f'\t !!! {init_data["login"]} - Ошибка инициализации - {init_data["terminal_path"]}')
     return result
 
 
@@ -385,7 +387,7 @@ def close_signal_position(signal, reason):
             comment = DealComment().set_from_string(ip.comment)
             if signal['ticket'] == comment.lieder_ticket:
                 close_position(position=ip, reason=reason, investor=None)
-        print(f'\t --- {signal["ticket"]} {reasons_code[reason]}')
+        # print(f'\t --- {signal["ticket"]} {reasons_code[reason]}')
 
 
 def close_investor_positions(signal_list):
@@ -504,45 +506,69 @@ def get_deal_volume(signal):
     return result
 
 
-def is_profitability_achieved(signal):
-    needed_level = signal['profitability']
+def get_profitability(signal):
     target_level = signal['target_value']
-    if target_level == 0:
-        print('Цель не установлена')
-        return False
+    if not target_level:
+        return 0.0
     if signal['deal_type'] == 0:  # BUY
         price = Mt.symbol_info_tick(signal['signal_symbol']).bid
         result = (target_level - price) / price * signal['multiplier']
     else:  # SELL
         price = Mt.symbol_info_tick(signal['signal_symbol']).ask
         result = (price - target_level) / price * signal['multiplier']
-    # print(signal)
-    print('profitability', result, '>=', needed_level)
-    return result >= needed_level
+    return result
 
 
-def is_risk_achieved(signal):
-    needed_level = signal['risk']
+# def is_profitability_achieved(signal):
+#     needed_level = signal['profitability']
+#     target_level = signal['target_value']
+#     if target_level == 0:
+#         print('Цель не установлена')
+#         return False
+#     if signal['deal_type'] == 0:  # BUY
+#         price = Mt.symbol_info_tick(signal['signal_symbol']).bid
+#         result = (target_level - price) / price * signal['multiplier']
+#     else:  # SELL
+#         price = Mt.symbol_info_tick(signal['signal_symbol']).ask
+#         result = (price - target_level) / price * signal['multiplier']
+#     # print(signal)
+#     print('profitability', result, '>=', needed_level)
+#     return result >= needed_level
+
+
+def get_risk(signal):
     target_level = signal['stop_value']
-    if target_level == 0:
-        print('Стоп не установлен')
-        return False
+    if not target_level:
+        return 0.0
     if signal['deal_type'] == 0:  # BUY
         price = Mt.symbol_info_tick(signal['signal_symbol']).bid
         result = (target_level - price) / price * signal['multiplier']
     else:  # SELL
         price = Mt.symbol_info_tick(signal['signal_symbol']).ask
         result = (price - target_level) / price * signal['multiplier']
-    print('risk', result, '<=', needed_level)
-    return result <= needed_level
+    return result
 
 
-def is_profit_achieved(signal):
-    needed_level = signal['profit']
+# def is_risk_achieved(signal):
+#     needed_level = signal['risk']
+#     target_level = signal['stop_value']
+#     if target_level == 0:
+#         print('Стоп не установлен')
+#         return False
+#     if signal['deal_type'] == 0:  # BUY
+#         price = Mt.symbol_info_tick(signal['signal_symbol']).bid
+#         result = (target_level - price) / price * signal['multiplier']
+#     else:  # SELL
+#         price = Mt.symbol_info_tick(signal['signal_symbol']).ask
+#         result = (price - target_level) / price * signal['multiplier']
+#     print('risk', result, '<=', needed_level)
+#     return result <= needed_level
+
+
+def get_profit(signal):
     target_level = signal['target_value']
-    if target_level == 0:
-        print('Цель не установлена')
-        return False
+    if not target_level:
+        return 0.0
     investment = signal['investment']
     if signal['deal_type'] == 0:  # BUY
         price = Mt.symbol_info_tick(signal['signal_symbol']).bid
@@ -550,5 +576,19 @@ def is_profit_achieved(signal):
     else:  # SELL
         price = Mt.symbol_info_tick(signal['signal_symbol']).ask
         result = (price - target_level) / price * signal['multiplier'] * investment
-    print('profit', result, '>=', needed_level)
-    return result >= needed_level
+    return result
+# def is_profit_achieved(signal):
+#     needed_level = signal['profit']
+#     target_level = signal['target_value']
+#     if target_level == 0:
+#         print('Цель не установлена')
+#         return False
+#     investment = signal['investment']
+#     if signal['deal_type'] == 0:  # BUY
+#         price = Mt.symbol_info_tick(signal['signal_symbol']).bid
+#         result = (target_level - price) / price * signal['multiplier'] * investment
+#     else:  # SELL
+#         price = Mt.symbol_info_tick(signal['signal_symbol']).ask
+#         result = (price - target_level) / price * signal['multiplier'] * investment
+#     print('profit', result, '>=', needed_level)
+#     return result >= needed_level
