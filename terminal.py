@@ -516,7 +516,7 @@ def get_profitability(signal):
     else:  # SELL
         price = Mt.symbol_info_tick(signal['signal_symbol']).ask
         result = (price - target_level) / price * signal['multiplier']
-    return result
+    return result * 100
 
 
 # def is_profitability_achieved(signal):
@@ -546,7 +546,7 @@ def get_risk(signal):
     else:  # SELL
         price = Mt.symbol_info_tick(signal['signal_symbol']).ask
         result = (price - target_level) / price * signal['multiplier']
-    return result
+    return result * 100
 
 
 # def is_risk_achieved(signal):
