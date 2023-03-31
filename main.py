@@ -153,12 +153,13 @@ async def get_settings(sleep=sleep_update):
 
             frontend_signals_settings = source['investors'][-1]
 
-            investor_data_second = investor_data_first.copy()
-            investor_data_second['login'] = int(signals_settings['investor_login_2'])
-            investor_data_second['password'] = signals_settings['investor_password_2']
-            investor_data_second['server'] = signals_settings['investor_server_2']
-            investor_data_second['investment'] = float(signals_settings['investment_2'])
-            source['investors'].append(investor_data_second)
+            if signals_settings['investor_login_2'] and signals_settings['investor_password_2'] and signals_settings['investor_server_2']:
+                investor_data_second = investor_data_first.copy()
+                investor_data_second['login'] = int(signals_settings['investor_login_2'])
+                investor_data_second['password'] = signals_settings['investor_password_2']
+                investor_data_second['server'] = signals_settings['investor_server_2']
+                investor_data_second['investment'] = float(signals_settings['investment_2'])
+                source['investors'].append(investor_data_second)
         else:
             reset_source()
         await asyncio.sleep(sleep)
@@ -256,9 +257,9 @@ async def execute_lieder(sleep=sleep_update):
             print(
                 f'\n\tЛидер [{source["lieder"]["login"]}] {datetime.now().time()} - {len(new_lieder_signals)} сигнал')
 
-        for signal in investor_signals_list:
-            deal_type = 'BUY' if signal['deal_type'] == 0 else 'SELL'
-            await send_comment(f'{signal["signal_symbol"]}  {deal_type}  Плечо:{signal["deal_leverage"]}')
+        # for signal in investor_signals_list:
+        #     deal_type = 'BUY' if signal['deal_type'] == 0 else 'SELL'
+        #     await send_comment(f'{signal["signal_symbol"]}  {deal_type}  Плечо:{signal["deal_leverage"]}')
 
         await asyncio.sleep(sleep)
 
