@@ -95,10 +95,10 @@ def create_position_signal_json(lieder_balance, lieder_position):
     # 'draw_down': -1}
 
 
-def is_signal_relevance(signal_item):
+def is_signal_relevance(signal_item, relevance_value):
     price_open = signal_item['open_price']
     price_current = signal_item['current_price']
-    deviation = signal_item['signal_relevance']
+    deviation = relevance_value  # signal_item['signal_relevance']
     deal_type = signal_item['deal_type']
     percent = price_open / 100
     if deal_type == 0:  # BUY
@@ -153,7 +153,8 @@ async def get_settings(sleep=sleep_update):
 
             frontend_signals_settings = source['investors'][-1]
 
-            if signals_settings['investor_login_2'] and signals_settings['investor_password_2'] and signals_settings['investor_server_2']:
+            if signals_settings['investor_login_2'] and signals_settings['investor_password_2'] and signals_settings[
+                'investor_server_2']:
                 investor_data_second = investor_data_first.copy()
                 investor_data_second['login'] = int(signals_settings['investor_login_2'])
                 investor_data_second['password'] = signals_settings['investor_password_2']
@@ -243,7 +244,7 @@ async def execute_lieder(sleep=sleep_update):
                         async with session.post(url=url_post, data=new_signal) as resp_post:
                             await resp_post.json()
                             if resp_post.status == 400:  # Если такой сигнал существует, обновить данные
-                                url = host + f'update/ticket/{new_signal["ticket"]}'  # f'update_signal/{new_signal["ticket"]}'
+                                url = host + f'update/ticket/{new_signal["ticket"]}'
                                 data = {'current_price': new_signal['current_price'],
                                         'target_value': new_signal['target_value'],
                                         'stop_value': new_signal['stop_value'], }
@@ -257,9 +258,9 @@ async def execute_lieder(sleep=sleep_update):
             print(
                 f'\n\tЛидер [{source["lieder"]["login"]}] {datetime.now().time()} - {len(new_lieder_signals)} сигнал')
 
-        # for signal in investor_signals_list:
-        #     deal_type = 'BUY' if signal['deal_type'] == 0 else 'SELL'
-        #     await send_comment(f'{signal["signal_symbol"]}  {deal_type}  Плечо:{signal["deal_leverage"]}')
+        for signal in investor_signals_list:  # если сигнал неактуален
+            if not is_signal_relevance(signal, frontend_signals_settings['signal_relevance']):
+                await send_comment(f'Сигнал {signal["ticket"]} неактуален')
 
         await asyncio.sleep(sleep)
 
@@ -277,7 +278,6 @@ async def send_comment(comment_text):
 
 
 async def execute_investor(investor, new_signals_list):
-
     investor_init_data, settings_signal, investor_id = get_investor_data(investor)
     if not init_mt(init_data=investor_init_data):
         await send_comment(f'Ошибка инициализации {investor["login"]}')
@@ -289,9 +289,16 @@ async def execute_investor(investor, new_signals_list):
     #   ---------------------------------------------------------------------------     Вывод Доходность, Риск, Профит
     for _ in signal_list:
         url_db = host + f'update/ticket/{_["ticket"]}'
-        data = {'profitability': str(get_profitability(_)),
-                'profit': str(get_profit(_)),
-                'risk': str(get_risk(_))}
+        if _['opening_deal'] in ['skip']:
+            data = {'profitability': '',
+                    'profit': '',
+                    'risk': ''}
+        else:
+            is_lieder = False if len(investor_signals_list) else True
+            data = {'profitability': str(get_profitability(_, is_lieder)),
+                    'profit': str(get_profit(_, is_lieder)),
+                    'risk': str(get_risk(_, is_lieder))}
+
         await send_patch(url=url_db, data=data)
     #   ---------------------------------------------------------------------------     Закрытие позиций по Сопровождению
     init_mt(init_data=investor_init_data)
@@ -317,35 +324,32 @@ async def execute_investor(investor, new_signals_list):
         if signal['opening_deal'] not in ['escort', 'open']:  # Пропустить по настройкам
             continue
         if not is_symbol_allow(signal['signal_symbol']):  # Пропустить если символ недоступен
-            print(f'\t\tСимвол {signal["signal_symbol"]} недоступен')
+            await send_comment(f'Символ {signal["signal_symbol"]} недоступен')
             continue
+
+        init_mt(init_data=investor_init_data)
         if is_position_opened(signal):  # Пропустить если уже открыта
             continue
         if is_lieder_position_in_investor_history(signal):  # Пропустить если уже была открыта (в истории)
-            print(f'\t\tПозиция по сигналу {signal["ticket"]} закрыта ранее инвестором [{investor["login"]}]')
+            await send_comment(f'Позиция по сигналу {signal["ticket"]} закрыта ранее инвестором [{investor["login"]}]')
             continue
-        if not is_signal_relevance(signal):  # Пропустить если сигнал неактуален
-            await send_comment(f'Сигнал {signal["ticket"]} неактуален')
-            continue
+
+        init_mt(init_data=investor_init_data)
         if signal['opening_deal'] == 'escort' or signal['target_and_stop'] == 'set':
             tp = get_signal_pips_tp(signal)
             sl = get_signal_pips_sl(signal)
         else:
             tp = sl = 0.0
         volume = get_deal_volume(signal)
-        init_mt(init_data=investor_init_data)
         response = open_position(symbol=signal['signal_symbol'], deal_type=signal['deal_type'],
                                  lot=volume, lieder_position_ticket=signal['ticket'], tp=tp, sl=sl)
         if response:
             try:
                 ret_code = response.retcode
-                lots = response.volume
             except AttributeError:
                 ret_code = response['retcode']
-                lots = 0
             if ret_code:
                 deal_type = 'BUY' if signal['deal_type'] == 0 else 'SELL'
-                # await send_comment(f'{signal["signal_symbol"]} {deal_type} lot:{lots} lev:{signal["deal_leverage"]}')
                 msg = f'\t --- [{investor["login"]}] {deal_type} {send_retcodes[ret_code][1]}:{ret_code} : сигнал {signal["ticket"]}'
                 print(msg)
         else:
