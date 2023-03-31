@@ -255,6 +255,11 @@ async def execute_lieder(sleep=sleep_update):
         if source["lieder"]["login"]:
             print(
                 f'\n\tЛидер [{source["lieder"]["login"]}] {datetime.now().time()} - {len(new_lieder_signals)} сигнал')
+
+        for signal in investor_signals_list:
+            deal_type = 'BUY' if signal['deal_type'] == 0 else 'SELL'
+            await send_comment(f'{signal["signal_symbol"]}  {deal_type}  Плечо:{signal["deal_leverage"]}')
+
         await asyncio.sleep(sleep)
 
 
@@ -272,10 +277,6 @@ async def send_comment(comment_text):
 
 async def execute_investor(investor, new_signals_list):
 
-    for signal in new_signals_list:
-        deal_type = 'BUY' if signal['deal_type'] == 0 else 'SELL'
-        await send_comment(f'Открытие Лидера {signal["signal_symbol"]} {deal_type}  lev:{signal["deal_leverage"]}')
-
     investor_init_data, settings_signal, investor_id = get_investor_data(investor)
     if not init_mt(init_data=investor_init_data):
         await send_comment(f'Ошибка инициализации {investor["login"]}')
@@ -284,7 +285,15 @@ async def execute_investor(investor, new_signals_list):
     print(f'\tИнвестор [{investor["login"]}] {datetime.now().time()} - {len(get_investor_positions())} позиций')
     #   ---------------------------------------------------------------------------     Объединение сигналов и настроек
     signal_list = unite_signals_list(new_signals_list, settings_signal)
-        #   ---------------------------------------------------------------------------     Закрытие позиций по Сопровождению
+    #   ---------------------------------------------------------------------------     Вывод Доходность, Риск, Профит
+    for _ in signal_list:
+        url_db = host + f'update/ticket/{_["ticket"]}'
+        data = {'profitability': str(get_profitability(_)),
+                'profit': str(get_profit(_)),
+                'risk': str(get_risk(_))}
+        await send_patch(url=url_db, data=data)
+    #   ---------------------------------------------------------------------------     Закрытие позиций по Сопровождению
+    init_mt(init_data=investor_init_data)
     exist_positions = get_investor_positions()
     for e_pos in exist_positions:
         comment = DealComment().set_from_string(e_pos.comment)
@@ -301,6 +310,7 @@ async def execute_investor(investor, new_signals_list):
             close_position(investor=investor, position=e_pos, reason='003')
             await send_comment(f'\t --- {e_pos.ticket} {reasons_code["003"]}')
     #   ---------------------------------------------------------------------------     Открытие
+    init_mt(init_data=investor_init_data)
     for signal in signal_list:
 
         if signal['opening_deal'] not in ['escort', 'open']:  # Пропустить по настройкам
@@ -314,7 +324,7 @@ async def execute_investor(investor, new_signals_list):
             print(f'\t\tПозиция по сигналу {signal["ticket"]} закрыта ранее инвестором [{investor["login"]}]')
             continue
         if not is_signal_relevance(signal):  # Пропустить если сигнал неактуален
-            print(f'\t\tСигнал {signal["ticket"]} неактуален')
+            await send_comment(f'Сигнал {signal["ticket"]} неактуален')
             continue
         if signal['opening_deal'] == 'escort' or signal['target_and_stop'] == 'set':
             tp = get_signal_pips_tp(signal)
@@ -322,6 +332,7 @@ async def execute_investor(investor, new_signals_list):
         else:
             tp = sl = 0.0
         volume = get_deal_volume(signal)
+        init_mt(init_data=investor_init_data)
         response = open_position(symbol=signal['signal_symbol'], deal_type=signal['deal_type'],
                                  lot=volume, lieder_position_ticket=signal['ticket'], tp=tp, sl=sl)
         if response:
@@ -333,28 +344,23 @@ async def execute_investor(investor, new_signals_list):
                 lots = 0
             if ret_code:
                 deal_type = 'BUY' if signal['deal_type'] == 0 else 'SELL'
-                await send_comment(f'{signal["signal_symbol"]} {deal_type} lot:{lots} lev:{signal["deal_leverage"]}')
-                # msg = f'\t --- [{investor["login"]}] {deal_type} {send_retcodes[ret_code][1]}:{ret_code} : сигнал {signal["ticket"]}'
-                # print(msg)
+                # await send_comment(f'{signal["signal_symbol"]} {deal_type} lot:{lots} lev:{signal["deal_leverage"]}')
+                msg = f'\t --- [{investor["login"]}] {deal_type} {send_retcodes[ret_code][1]}:{ret_code} : сигнал {signal["ticket"]}'
+                print(msg)
         else:
             print('EMPTY_OPEN_DEAL_RESPONSE')
     #   ---------------------------------------------------------------------------     Сопровождение
     if not len(get_investor_positions()):
         return
 
-    for _ in signal_list:
-        url_db = host + f'update/ticket/{_["ticket"]}'
-        data = {'profitability': str(get_profitability(_)),
-                'profit': str(get_profit(_)),
-                'risk': str(get_risk(_))}
-        await send_patch(url=url_db, data=data)
-
+    init_mt(init_data=investor_init_data)
     for signal in signal_list:
         # Коррекция Тейк-профит и Стоп-лосс
         if signal['opening_deal'] == 'escort' or signal['target_and_stop'] == 'set':
             synchronize_position_limits(signal=signal)
 
     #   ---------------------------------------------------------------------------     Закрытие
+    init_mt(init_data=investor_init_data)
     for signal in signal_list:
         if signal['closing_deal'] == 'close':  # Ручное закрытие через инвест платформу
             close_signal_position(signal=signal, reason='002')
