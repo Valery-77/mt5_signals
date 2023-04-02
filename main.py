@@ -294,10 +294,16 @@ async def execute_investor(investor, new_signals_list):
                     'profit': '',
                     'risk': ''}
         else:
-            is_lieder = False if len(investor_signals_list) else True
-            data = {'profitability': str(get_profitability(_, is_lieder)),
-                    'profit': str(get_profit(_, is_lieder)),
-                    'risk': str(get_risk(_, is_lieder))}
+            for_open_price = False  # if len(signal_list) else True
+            positions = get_investor_positions()
+            for position in positions:
+                comment = DealComment().set_from_string(position.comment)
+                if _['ticket'] == comment.lieder_ticket:
+                    for_open_price = True
+                    break
+            data = {'profitability': str(get_profitability(_, for_open_price)),
+                    'profit': str(get_profit(_, for_open_price)),
+                    'risk': str(get_risk(_, for_open_price))}
 
         await send_patch(url=url_db, data=data)
     #   ---------------------------------------------------------------------------     Закрытие позиций по Сопровождению

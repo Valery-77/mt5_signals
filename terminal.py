@@ -506,41 +506,53 @@ def get_deal_volume(signal):
     return result
 
 
-def get_profitability(signal, is_lieder):
+def get_investor_position_open_price(lieder_position_ticket):
+    """Получение цены открытия позиции инвестора из тикета позиции лидера"""
+    positions = get_investor_positions()
+    for pos in positions:
+        comment = DealComment().set_from_string(pos.comment)
+        if comment.lieder_ticket == lieder_position_ticket:
+            return pos.price_open
+    return -1
+
+
+def get_profitability(signal, for_open_price):
     target_level = signal['target_value']
     if not target_level:
         return 0.0
+    # print('+++',get_investor_position_open_price(signal['ticket']))
     if signal['deal_type'] == 0:  # BUY
-        price = signal['current_price'] if is_lieder else Mt.symbol_info_tick(signal['signal_symbol']).bid
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).bid
         result = (target_level - price) / price * signal['multiplier']
     else:  # SELL
-        price = signal['current_price'] if is_lieder else Mt.symbol_info_tick(signal['signal_symbol']).ask
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).ask
         result = (price - target_level) / price * signal['multiplier']
+    # print(price, for_open_price)
     return round(result * 100, 2)
 
 
-def get_risk(signal, is_lieder):
+def get_risk(signal, for_open_price):
     target_level = signal['stop_value']
     if not target_level:
         return 0.0
     if signal['deal_type'] == 0:  # BUY
-        price = signal['current_price'] if is_lieder else Mt.symbol_info_tick(signal['signal_symbol']).bid
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).bid
         result = (target_level - price) / price * signal['multiplier']
     else:  # SELL
-        price = signal['current_price'] if is_lieder else Mt.symbol_info_tick(signal['signal_symbol']).ask
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).ask
         result = (price - target_level) / price * signal['multiplier']
     return round(result * 100, 2)
 
 
-def get_profit(signal, is_lieder):
+def get_profit(signal, for_open_price):
     target_level = signal['target_value']
     if not target_level:
         return 0.0
     investment = signal['investment']
     if signal['deal_type'] == 0:  # BUY
-        price = signal['current_price'] if is_lieder else Mt.symbol_info_tick(signal['signal_symbol']).bid
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).bid
         result = (target_level - price) / price * signal['multiplier'] * investment
     else:  # SELL
-        price = signal['current_price'] if is_lieder else Mt.symbol_info_tick(signal['signal_symbol']).ask
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).ask
         result = (price - target_level) / price * signal['multiplier'] * investment
     return round(result, 2)
