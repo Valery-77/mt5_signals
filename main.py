@@ -77,7 +77,7 @@ def create_position_signal_json(lieder_balance, lieder_position):
     return {'ticket': lieder_position.ticket,
             'deal_type': lieder_position.type,
             'current_price': lieder_position.price_current,
-            'deal_leverage': leverage,
+            'deal_leverage': round(leverage, 2),
             'signal_symbol': lieder_position.symbol,
             'open_price': lieder_position.price_open,
             'target_value': lieder_position.tp,
@@ -223,6 +223,64 @@ async def disable_closed_positions_signals():
     return close_position_signal_list
 
 
+async def send_comment(comment_text):
+    if comment_text != '':
+        print(f'\t\t --- {comment_text}')
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url=host + 'setting/last') as response:
+            idx = await response.json()
+    url = host + f'setting/update/{idx[0]["id"]}'
+    data = {'comment': comment_text}
+    async with aiohttp.ClientSession() as session:
+        async with session.patch(url=url, data=data) as response:
+            return response
+
+
+async def send_relevance(signal, relevance):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url=host + 'last') as response:
+            resp = await response.json()
+    url = host + f'update/{resp[-1]["id"]}'
+    # print(relevance, signal['opening_deal'])
+    if resp:
+        data = {'relevance_comment': ''}
+        if relevance is not None and signal['opening_deal'] != 'skip':
+            data = {'relevance_comment': 'Актуален' if relevance else 'Неактуален'}
+            print(f'\t\t --- ' + data['relevance_comment'])
+
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(url=url, data=data) as response:
+                return response
+
+
+async def send_signal_marker_close(setting):
+    url = host + 'last'
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as get_response:
+                if get_response:
+                    response = await get_response.json()
+    except Exception as e:
+        print(e)
+    if response:
+        if not response[-1]['status'] and setting['closing_deal'] != 'skip':
+            string = 'CLOSE BUY' if response[-1]['deal_type'] == 0 else 'CLOSE SELL'
+            await send_comment(string)
+
+
+async def send_signal_marker_open(signal, positions):
+    string = ''
+    exist_flag = False
+    for pos in positions:
+        com = DealComment().set_from_string(pos.comment)
+        if com.lieder_ticket == signal['ticket']:
+            exist_flag = True
+            break
+    if not exist_flag and signal['opening_deal'] != 'skip':
+        string = 'BUY' if signal['deal_type'] == 0 else 'SELL'
+    await send_comment(string)
+
+
 async def execute_lieder(sleep=sleep_update):
     global new_lieder_signals
     url_post = host + 'create'  # 'create_signal'
@@ -254,27 +312,14 @@ async def execute_lieder(sleep=sleep_update):
                 print('execute_lieder()', e)
 
         await disable_closed_positions_signals()  # ----------------------------   Закрытие сигналов
+
+        await send_signal_marker_close(frontend_signals_settings)  # -----------   Marker CLOSE
+
         if source["lieder"]["login"]:
             print(
                 f'\n\tЛидер [{source["lieder"]["login"]}] {datetime.now().time()} - {len(new_lieder_signals)} сигнал')
 
-        for signal in investor_signals_list:  # если сигнал неактуален
-            if not is_signal_relevance(signal, frontend_signals_settings['signal_relevance']):
-                await send_comment(f'Сигнал {signal["ticket"]} неактуален')
-
         await asyncio.sleep(sleep)
-
-
-async def send_comment(comment_text):
-    print(f'\t\t --- {comment_text}')
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url=host + 'setting/last') as response:
-            idx = await response.json()
-    url = host + f'setting/update/{idx[0]["id"]}'
-    data = {'comment': comment_text}
-    async with aiohttp.ClientSession() as session:
-        async with session.patch(url=url, data=data) as response:
-            return response
 
 
 async def execute_investor(investor, new_signals_list):
@@ -313,31 +358,54 @@ async def execute_investor(investor, new_signals_list):
         comment = DealComment().set_from_string(e_pos.comment)
         position_exist = False
         for signal in signal_list:
-            # if signal['closing_deal'] != 'escort':  # 'Сопровождение':
-            #     continue
             if signal['ticket'] == comment.lieder_ticket:
                 position_exist = True
                 break
-        if (frontend_signals_settings['closing_deal'] == 'escort'
-            or frontend_signals_settings['opening_deal'] == 'escort') \
-                and not position_exist:
-            close_position(investor=investor, position=e_pos, reason='003')
-            await send_comment(f'\t --- {e_pos.ticket} {reasons_code["003"]}')
+        if not position_exist:
+            init_mt(investor_init_data)
+            condition_1 = frontend_signals_settings['opening_deal'] == 'escort' and \
+                          frontend_signals_settings['closing_deal'] != 'skip'
+            condition_2 = frontend_signals_settings['closing_deal'] == 'escort'
+            if condition_1 or condition_2:
+                close_position(investor=investor, position=e_pos, reason='003')
+                # await send_comment(f'\t --- {e_pos.ticket} {reasons_code["003"]}')
     #   ---------------------------------------------------------------------------     Открытие
     init_mt(init_data=investor_init_data)
     for signal in signal_list:
 
-        if signal['opening_deal'] not in ['escort', 'open']:  # Пропустить по настройкам
-            continue
         if not is_symbol_allow(signal['signal_symbol']):  # Пропустить если символ недоступен
             await send_comment(f'Символ {signal["signal_symbol"]} недоступен')
             continue
+
+        if frontend_signals_settings['signal_relevance']:  # -----------------------    Актуальность
+            init_mt(investor_init_data)
+            invest_positions = get_investor_positions()
+            exist_flag = False
+            for pos in invest_positions:
+                com = DealComment().set_from_string(pos.comment)
+                if com.lieder_ticket == signal['ticket']:
+                    exist_flag = True
+                    break
+            if exist_flag:
+                await send_relevance(signal=signal, relevance=None)
+            else:
+                await send_relevance(signal=signal,
+                                     relevance=is_signal_relevance(signal,
+                                                                   frontend_signals_settings['signal_relevance']))
+        # f'Сигнал {signal["ticket"]} неактуален'
+
+        init_mt(init_data=investor_init_data)  # --------------------------- Marker OPEN
+        inv_positions = get_investor_positions()
+        await send_signal_marker_open(signal, inv_positions)
 
         init_mt(init_data=investor_init_data)
         if is_position_opened(signal):  # Пропустить если уже открыта
             continue
         if is_lieder_position_in_investor_history(signal):  # Пропустить если уже была открыта (в истории)
-            await send_comment(f'Позиция по сигналу {signal["ticket"]} закрыта ранее инвестором [{investor["login"]}]')
+            print(f'\t\t --- Позиция по сигналу {signal["ticket"]} закрыта ранее инвестором [{investor["login"]}]')
+            continue
+
+        if signal['opening_deal'] not in ['escort', 'open']:  # Пропустить по настройкам
             continue
 
         init_mt(init_data=investor_init_data)
@@ -356,7 +424,7 @@ async def execute_investor(investor, new_signals_list):
                 ret_code = response['retcode']
             if ret_code:
                 deal_type = 'BUY' if signal['deal_type'] == 0 else 'SELL'
-                msg = f'\t --- [{investor["login"]}] {deal_type} {send_retcodes[ret_code][1]}:{ret_code} : сигнал {signal["ticket"]}'
+                msg = f'\t -- [{investor["login"]}] {deal_type} {send_retcodes[ret_code][1]}:{ret_code} : сигнал {signal["ticket"]}'
                 print(msg)
         else:
             print('EMPTY_OPEN_DEAL_RESPONSE')
@@ -375,7 +443,7 @@ async def execute_investor(investor, new_signals_list):
     for signal in signal_list:
         if signal['closing_deal'] == 'close':  # Ручное закрытие через инвест платформу
             close_signal_position(signal=signal, reason='002')
-            await send_comment(f'\t --- {signal["ticket"]} {reasons_code["002"]}')
+            print(f'\t --- {signal["ticket"]} {reasons_code["002"]}')
             # position = get_investor_position_for_signal(signal)
             # if position:
             #     close_position(investor=investor, position=position, reason='002')
