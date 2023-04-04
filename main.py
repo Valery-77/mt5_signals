@@ -9,6 +9,7 @@ exist_lieder_signals = new_lieder_signals = investor_signals_list = []  # defaul
 signals_settings = {}  # default var
 frontend_signals_settings = {}  # default var
 source = {}
+deal_count = 0
 
 sleep_update = 1  # пауза для обновления лидера
 
@@ -109,7 +110,7 @@ def is_signal_relevance(signal_item, relevance_value):
 
 
 async def get_settings(sleep=sleep_update):
-    global signals_settings, source, frontend_signals_settings
+    global signals_settings, source, frontend_signals_settings, deal_count
     url = host + 'setting/last'
     while True:
         # print('\t----', datetime.now())
@@ -163,6 +164,7 @@ async def get_settings(sleep=sleep_update):
                 source['investors'].append(investor_data_second)
         else:
             reset_source()
+            deal_count = 0
         await asyncio.sleep(sleep)
 
 
@@ -178,7 +180,7 @@ async def get_signals_list(sleep=sleep_update):
                         response = await get_response.json()
         except Exception as e:
             print(e)
-            response = {}
+            response = []
         investor_signals_list = []
         if len(response):
             for signal in response:
@@ -263,7 +265,7 @@ async def send_signal_marker_close(setting):
     except Exception as e:
         print(e)
     if response:
-        if not response[-1]['status'] and setting['closing_deal'] != 'skip':
+        if not response[-1]['status'] and setting['closing_deal'] != 'skip' and deal_count > 0:
             string = 'CLOSE BUY' if response[-1]['deal_type'] == 0 else 'CLOSE SELL'
             await send_comment(string)
 
@@ -323,6 +325,7 @@ async def execute_lieder(sleep=sleep_update):
 
 
 async def execute_investor(investor, new_signals_list):
+    global deal_count
     investor_init_data, settings_signal, investor_id = get_investor_data(investor)
     if not init_mt(init_data=investor_init_data):
         await send_comment(f'Ошибка инициализации {investor["login"]}')
@@ -423,6 +426,7 @@ async def execute_investor(investor, new_signals_list):
             except AttributeError:
                 ret_code = response['retcode']
             if ret_code:
+                deal_count += 1
                 deal_type = 'BUY' if signal['deal_type'] == 0 else 'SELL'
                 msg = f'\t -- [{investor["login"]}] {deal_type} {send_retcodes[ret_code][1]}:{ret_code} : сигнал {signal["ticket"]}'
                 print(msg)
