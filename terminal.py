@@ -406,37 +406,6 @@ def get_investor_position_for_signal(signal):
     return None
 
 
-# def get_lots_for_investment(symbol, investment):
-#     # investment = 1259
-#     # smb = 'GBPUSD'
-#     print(
-#         f'\nsymbol: {symbol}')  # currency_base: {Mt.symbol_info(smb).currency_base}  currency_profit: {Mt.symbol_info(smb).currency_profit}  currency_margin: {Mt.symbol_info(smb).currency_margin}')
-#     price = Mt.symbol_info_tick(symbol).bid
-#     leverage = Mt.account_info().leverage
-#     contract = Mt.symbol_info(symbol).trade_contract_size
-#
-#     min_lot = Mt.symbol_info(symbol).volume_min
-#     lot_step = Mt.symbol_info(symbol).volume_step
-#     decimals = str(lot_step)[::-1].find('.')
-#
-#     volume_none_round = (investment * leverage) / (contract * price)
-#     # volume = floor((investment * leverage) / (contract * price) / lot_step) * lot_step
-#     # print(floor((investment * leverage) / (contract * price) / lot_step), lot_step)
-#     # print(f'Неокругленный объем: {volume_none_round}  Округленный объем: {volume}')
-#     if volume_none_round < min_lot:
-#         volume = 0.0
-#     else:
-#         volume = round(floor(volume_none_round / lot_step) * lot_step, decimals)
-#
-#     print(
-#         f'Размер инвестиции: {investment}  Курс: {price}  Контракт: {contract}  Плечо: {leverage}  >>  ОБЪЕМ: {volume}')
-#
-#     # calc_margin = Mt.order_calc_margin(0, symbol, volume, price)
-#     # print('Стоимость сделки:', calc_margin,
-#     #       f' Остаток: {round(investment - calc_margin, 2)}' if calc_margin else 'Не хватает средств')
-#     return volume
-
-
 def synchronize_position_limits(signal):
     """Изменение уровней ТП и СЛ указанной позиции"""
     i_pos = get_investor_position_for_signal(signal)
@@ -522,10 +491,12 @@ def get_profitability(signal, for_open_price):
         return 0.0
     # print('+++',get_investor_position_open_price(signal['ticket']))
     if signal['deal_type'] == 0:  # BUY
-        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).bid
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(
+            signal['signal_symbol']).bid
         result = (target_level - price) / price * signal['multiplier']
     else:  # SELL
-        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).ask
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(
+            signal['signal_symbol']).ask
         result = (price - target_level) / price * signal['multiplier']
     # print(price, for_open_price)
     return round(result * 100, 2)
@@ -536,10 +507,12 @@ def get_risk(signal, for_open_price):
     if not target_level:
         return 0.0
     if signal['deal_type'] == 0:  # BUY
-        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).bid
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(
+            signal['signal_symbol']).bid
         result = (target_level - price) / price * signal['multiplier']
     else:  # SELL
-        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).ask
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(
+            signal['signal_symbol']).ask
         result = (price - target_level) / price * signal['multiplier']
     return round(result * 100, 2)
 
@@ -550,9 +523,11 @@ def get_profit(signal, for_open_price):
         return 0.0
     investment = signal['investment']
     if signal['deal_type'] == 0:  # BUY
-        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).bid
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(
+            signal['signal_symbol']).bid
         result = (target_level - price) / price * signal['multiplier'] * investment
     else:  # SELL
-        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(signal['signal_symbol']).ask
+        price = get_investor_position_open_price(signal['ticket']) if for_open_price else Mt.symbol_info_tick(
+            signal['signal_symbol']).ask
         result = (price - target_level) / price * signal['multiplier'] * investment
     return round(result, 2)

@@ -102,9 +102,9 @@ def is_signal_relevance(signal_item, relevance_value):
     deviation = relevance_value  # signal_item['signal_relevance']
     deal_type = signal_item['deal_type']
     percent = price_open / 100
-    if deal_type == 0:  # BUY
+    if deal_type == 1:  # SELL
         actual_level = (price_open - price_current) / percent
-    else:  # SELL
+    else:  # BUY
         actual_level = (price_current - price_open) / percent
     return actual_level < deviation
 
@@ -395,7 +395,6 @@ async def execute_investor(investor, new_signals_list):
                 await send_relevance(signal=signal,
                                      relevance=is_signal_relevance(signal,
                                                                    frontend_signals_settings['signal_relevance']))
-        # f'Сигнал {signal["ticket"]} неактуален'
 
         init_mt(init_data=investor_init_data)  # --------------------------- Marker OPEN
         inv_positions = get_investor_positions()
